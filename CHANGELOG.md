@@ -12,6 +12,24 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.2.0] - 2026-11-04
+
+### Aggiunto
+- Ritaglio, foro e separazione con un **poligono** disegnato a clic (`RT_CLIPPOLY`,
+  `RT_HOLEPOLY`, `RT_CUTPOLY`): Invio o un clic sul primo vertice chiudono il poligono.
+- Ritaglio, foro e separazione con una **polilinea chiusa**, un cerchio o un'ellisse
+  già presenti nel disegno (`RT_CLIPPL`, `RT_HOLEPL`, `RT_CUTPL`); i lati ad arco
+  delle polilinee sono seguiti fedelmente. Si sceglie la polilinea cliccandola o
+  cliccando al suo interno; se immagine e polilinea sono già selezionate il ritaglio
+  è immediato.
+- Nella scheda Raster i pulsanti Ritaglia, Foro e Separa pezzo diventano menu con
+  tre scelte: Rettangolo, Poligono, Da polilinea.
+
+### Modificato
+- Un nuovo ritaglio su un'immagine già ritagliata restringe il ritaglio anche con i
+  poligoni (se entrambi i contorni sono concavi, il nuovo sostituisce il vecchio).
+- I contorni che si intersecano con se stessi vengono rifiutati con un messaggio chiaro.
+
 ## [0.1.0] - 2026-11-04
 
 Prima versione pubblica, in fase di test.

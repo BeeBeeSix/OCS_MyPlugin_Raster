@@ -259,7 +259,7 @@ pub const MIN_AREA_PX: f64 = 1e-6;
 /// Turn a pixel-space region into a clip-space boundary: a rectangle when it
 /// is one, otherwise a closed polygon. `None` when it is (nearly) empty.
 pub fn shape_from_px(h: f64, poly_px: &[P2]) -> Option<Shape> {
-    let poly = dedup(poly_px, 1e-9);
+    let poly = ccw(&dedup(poly_px, 1e-9));
     if poly.len() < 3 || signed_area(&poly).abs() < MIN_AREA_PX {
         return None;
     }
@@ -336,12 +336,208 @@ pub fn units_per_inch(unit: &str) -> Option<f64> {
     }
 }
 
+// ── Polygons ────────────────────────────────────────────────────────────────
+
+/// Counter-clockwise copy of a polygon.
+pub fn ccw(poly: &[P2]) -> Vec<P2> {
+    let mut p = poly.to_vec();
+    if signed_area(&p) < 0.0 {
+        p.reverse();
+    }
+    p
+}
+
+/// Whether a (deduplicated) polygon is convex.
+pub fn is_convex(poly: &[P2]) -> bool {
+    let p = dedup(poly, 1e-12);
+    let n = p.len();
+    if n < 3 {
+        return false;
+    }
+    let mut sign = 0.0f64;
+    for i in 0..n {
+        let (a, b, c) = (p[i], p[(i + 1) % n], p[(i + 2) % n]);
+        let cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+        if cross.abs() <= 1e-12 * (1.0 + cross.abs()) {
+            continue;
+        }
+        if sign == 0.0 {
+            sign = cross.signum();
+        } else if cross.signum() != sign {
+            return false;
+        }
+    }
+    true
+}
+
+fn segments_cross(a: P2, b: P2, c: P2, d: P2) -> bool {
+    let orient = |p: P2, q: P2, r: P2| (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
+    let on_seg = |p: P2, q: P2, r: P2| {
+        r[0] >= p[0].min(q[0]) - 1e-12
+            && r[0] <= p[0].max(q[0]) + 1e-12
+            && r[1] >= p[1].min(q[1]) - 1e-12
+            && r[1] <= p[1].max(q[1]) + 1e-12
+    };
+    let (d1, d2, d3, d4) = (orient(c, d, a), orient(c, d, b), orient(a, b, c), orient(a, b, d));
+    let eps = 1e-12;
+    if ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps)) && ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps)) {
+        return true;
+    }
+    (d1.abs() <= eps && on_seg(c, d, a))
+        || (d2.abs() <= eps && on_seg(c, d, b))
+        || (d3.abs() <= eps && on_seg(a, b, c))
+        || (d4.abs() <= eps && on_seg(a, b, d))
+}
+
+/// Whether a closed polygon has no self-intersections (edges that are not
+/// neighbours never touch).
+pub fn is_simple(poly: &[P2]) -> bool {
+    let p = dedup(poly, 1e-12);
+    let n = p.len();
+    if n < 3 {
+        return false;
+    }
+    for i in 0..n {
+        let (a, b) = (p[i], p[(i + 1) % n]);
+        for j in (i + 1)..n {
+            // Skip the edge itself and its two neighbours.
+            if j == i || j == (i + 1) % n || (j + 1) % n == i {
+                continue;
+            }
+            let (c, d) = (p[j], p[(j + 1) % n]);
+            if segments_cross(a, b, c, d) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Even-odd point-in-polygon test (x/y).
+pub fn point_in_polygon(poly: &[P2], p: P2) -> bool {
+    let n = poly.len();
+    let mut inside = false;
+    let mut j = n.wrapping_sub(1);
+    for i in 0..n {
+        let (a, b) = (poly[i], poly[j]);
+        if (a[1] > p[1]) != (b[1] > p[1]) {
+            let x = (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0];
+            if p[0] < x {
+                inside = !inside;
+            }
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Points of a polyline whose vertices carry DXF bulges (`tan(sweep/4)`,
+/// positive = counter-clockwise), arcs flattened to chords of at most
+/// `max_step` radians. `closed` adds the segment back to the first vertex.
+/// The last vertex is not repeated.
+pub fn flatten_bulged(verts: &[(P2, f64)], closed: bool, max_step: f64) -> Vec<P2> {
+    let n = verts.len();
+    let mut out = Vec::with_capacity(n * 2);
+    if n == 0 {
+        return out;
+    }
+    let segs = if closed { n } else { n - 1 };
+    out.push(verts[0].0);
+    for i in 0..segs {
+        let (p, b) = verts[i];
+        let q = verts[(i + 1) % n].0;
+        if b.abs() > 1e-12 {
+            let theta = 4.0 * b.atan();
+            let (mx, my) = ((p[0] + q[0]) * 0.5, (p[1] + q[1]) * 0.5);
+            let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
+            // Centre: chord midpoint moved along the chord's left normal.
+            let k = (1.0 - b * b) / (4.0 * b);
+            let c = [mx - dy * k, my + dx * k];
+            let r = (p[0] - c[0]).hypot(p[1] - c[1]);
+            let a0 = (p[1] - c[1]).atan2(p[0] - c[0]);
+            let steps = ((theta.abs() / max_step).ceil() as usize).max(1);
+            for s in 1..steps {
+                let a = a0 + theta * s as f64 / steps as f64;
+                out.push([c[0] + r * a.cos(), c[1] + r * a.sin()]);
+            }
+        }
+        if i + 1 < n || !closed {
+            out.push(q);
+        }
+    }
+    out
+}
+
+/// A full ellipse (a circle when `ratio == 1`) as a ring of `steps` points.
+pub fn ellipse_ring(center: P2, major: P2, ratio: f64, steps: usize) -> Vec<P2> {
+    let minor = [-major[1] * ratio, major[0] * ratio];
+    (0..steps)
+        .map(|i| {
+            let t = std::f64::consts::TAU * i as f64 / steps as f64;
+            let (c, s) = (t.cos(), t.sin());
+            [center[0] + major[0] * c + minor[0] * s, center[1] + major[1] * c + minor[1] * s]
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn near(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn convexity_and_simplicity() {
+        let square = [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]];
+        let ell = [[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0], [1.0, 2.0], [0.0, 2.0]];
+        let bow = [[0.0, 0.0], [2.0, 2.0], [2.0, 0.0], [0.0, 2.0]];
+        assert!(is_convex(&square) && is_simple(&square));
+        assert!(!is_convex(&ell) && is_simple(&ell));
+        assert!(!is_simple(&bow));
+        assert!(point_in_polygon(&ell, [0.5, 1.5]));
+        assert!(!point_in_polygon(&ell, [1.5, 1.5]));
+    }
+
+    #[test]
+    fn bulge_semicircle() {
+        // From (0,0) to (2,0) with bulge 1: a CCW half circle through (1,-1).
+        let pts = flatten_bulged(&[([0.0, 0.0], 1.0), ([2.0, 0.0], 0.0)], false, 0.1);
+        assert!(pts.len() > 10);
+        for p in &pts {
+            assert!(near((p[0] - 1.0).hypot(p[1]), 1.0), "{p:?}");
+            assert!(p[1] <= 1e-9);
+        }
+        assert_eq!(*pts.last().unwrap(), [2.0, 0.0]);
+        // Closed square with one arc side: no repeated first vertex.
+        let ring = flatten_bulged(
+            &[([0.0, 0.0], 0.0), ([2.0, 0.0], 0.0), ([2.0, 2.0], 0.0), ([0.0, 2.0], 0.0)],
+            true,
+            0.1,
+        );
+        assert_eq!(ring.len(), 4);
+    }
+
+    #[test]
+    fn concave_polygon_inside_frame_keeps_its_shape() {
+        let f = Frame { ins: [0.0, 0.0, 0.0], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0], w: 100.0, h: 100.0 };
+        let ell = vec![[10.0, 10.0], [60.0, 10.0], [60.0, 30.0], [30.0, 30.0], [30.0, 60.0], [10.0, 60.0]];
+        let r = clip_convex(&ell, &f.full_px());
+        match shape_from_px(f.h, &r).unwrap() {
+            Shape::Poly(ring) => assert_eq!(ring.len(), 7),
+            s => panic!("{s:?}"),
+        }
+    }
+
+    #[test]
+    fn ellipse_ring_is_on_curve() {
+        let r = ellipse_ring([1.0, 2.0], [3.0, 0.0], 0.5, 32);
+        assert_eq!(r.len(), 32);
+        for p in r {
+            let (x, y) = ((p[0] - 1.0) / 3.0, (p[1] - 2.0) / 1.5);
+            assert!(near(x * x + y * y, 1.0));
+        }
     }
 
     fn sample() -> Frame {

@@ -31,6 +31,28 @@ fn file_tool(id: &'static str, label: &'static str, svg: &'static [u8], title: &
     })
 }
 
+const CLIP: &[u8] = include_bytes!("../icons/clip.svg");
+const HOLE: &[u8] = include_bytes!("../icons/hole.svg");
+const CUT: &[u8] = include_bytes!("../icons/cut.svg");
+const POLY: &[u8] = include_bytes!("../icons/poly.svg");
+const PLINE: &[u8] = include_bytes!("../icons/pline.svg");
+
+/// A clip tool with its three outline choices: window, polygon drawn by
+/// clicks, existing closed polyline. The face runs the window form.
+fn clip_menu(id: &'static str, label: &'static str, icon: &'static [u8], cmds: [&'static str; 3]) -> RibbonItem {
+    RibbonItem::LargeDropdown {
+        id,
+        label,
+        icon: IconKind::Svg(icon),
+        items: vec![
+            (cmds[0], "Rettangolo", IconKind::Svg(icon)),
+            (cmds[1], "Poligono", IconKind::Svg(POLY)),
+            (cmds[2], "Da polilinea", IconKind::Svg(PLINE)),
+        ],
+        default: cmds[0],
+    }
+}
+
 impl CadModule for RasterModule {
     fn id(&self) -> &'static str {
         "rastertools"
@@ -47,9 +69,9 @@ impl CadModule for RasterModule {
                 RibbonGroup {
                     title: "Ritaglio",
                     tools: vec![
-                        cmd("RT_CLIP", "Ritaglia", include_bytes!("../icons/clip.svg")),
-                        cmd("RT_CLIPHOLE", "Foro", include_bytes!("../icons/hole.svg")),
-                        cmd("RT_CUT", "Separa pezzo", include_bytes!("../icons/cut.svg")),
+                        clip_menu("RT_CLIP_MENU", "Ritaglia", CLIP, ["RT_CLIP", "RT_CLIPPOLY", "RT_CLIPPL"]),
+                        clip_menu("RT_HOLE_MENU", "Foro", HOLE, ["RT_CLIPHOLE", "RT_HOLEPOLY", "RT_HOLEPL"]),
+                        clip_menu("RT_CUT_MENU", "Separa pezzo", CUT, ["RT_CUT", "RT_CUTPOLY", "RT_CUTPL"]),
                         cmd("RT_UNCLIP", "Togli ritaglio", include_bytes!("../icons/unclip.svg")),
                     ],
                 },

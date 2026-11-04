@@ -9,9 +9,10 @@ Plugin per [Open CAD Studio](https://github.com/HakanSeven12/OpenCADStudio) che
 aggiunge la scheda **Raster** per lavorare sulle immagini GIF, JPG, PNG, BMP,
 TIFF e WebP inserite nei disegni DWG/DXF:
 
-- **ritagliare** un'immagine con un rettangolo (tenere l'interno), fare un
-  **foro** (nascondere l'interno) o **separare un pezzo** in una nuova immagine
-  da spostare;
+- **ritagliare** un'immagine (tenere l'interno), fare un **foro** (nascondere
+  l'interno) o **separare un pezzo** in una nuova immagine da spostare, con un
+  **rettangolo**, un **poligono** disegnato a clic o una **polilinea chiusa**,
+  un cerchio o un'ellisse già nel disegno;
 - **ridimensionare** trascinando un angolo, oppure a larghezza / altezza /
   fattore di scala / **DPI** esatti;
 - **cambiare il percorso su disco** del file dell'immagine e **ritrovare** in
@@ -26,6 +27,8 @@ Il riferimento completo dei comandi è in [PLUGIN.md](PLUGIN.md).
 |---|---|
 | tagliare via i bordi di una foto | **Ritaglia**, clic sull'immagine, due angoli del rettangolo da tenere |
 | nascondere una zona | **Foro**, clic sull'immagine, due angoli |
+| ritagliare lungo un contorno irregolare | **Ritaglia ▾ › Poligono**, clic sull'immagine, clic sui vertici, Invio |
+| ritagliare lungo una polilinea già disegnata | seleziona immagine e polilinea → **Ritaglia ▾ › Da polilinea** |
 | ritagliare un dettaglio e spostarlo | **Separa pezzo**, poi `SPOSTA` sul pezzo (resta selezionato) |
 | portare una scansione in scala 1:1 | seleziona l'immagine → **Dimensioni / DPI** → modo *DPI*, 300, millimetri |
 | ingrandire a occhio | **Trascina**: angolo fisso, poi angolo opposto |

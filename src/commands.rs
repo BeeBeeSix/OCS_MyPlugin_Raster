@@ -38,6 +38,88 @@ fn take_pending_path() -> Option<String> {
     PENDING_PATH.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
+/// A clip polygon drawn or picked by a tool, waiting for `RT_CLIPPOLYAPPLY`
+/// (a polyline with arcs can have hundreds of vertices — too long for a
+/// command line).
+static PENDING_POLY: Mutex<Option<Vec<P3>>> = Mutex::new(None);
+
+pub fn set_pending_poly(poly: Vec<P3>) {
+    *PENDING_POLY.lock().unwrap_or_else(|e| e.into_inner()) = Some(poly);
+}
+
+fn take_pending_poly() -> Option<Vec<P3>> {
+    PENDING_POLY.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// Largest angle between two points of an arc when polylines, circles and
+/// ellipses are turned into clip polygons (3°).
+const ARC_STEP: f64 = std::f64::consts::PI / 60.0;
+const ELLIPSE_STEPS: usize = 120;
+
+fn plan_normal(n: &Vector3) -> bool {
+    n.z > 0.999_999
+}
+
+/// Every closed outline in the drawing that can serve as a clip boundary —
+/// closed polylines (arcs flattened), circles and full ellipses — as world
+/// rings (first vertex not repeated). Shapes whose plane is not the XY plane
+/// are skipped.
+pub fn closed_shapes(host: &dyn HostApi) -> Vec<(Handle, Vec<P3>)> {
+    let mut out = Vec::new();
+    for e in host.document().entities() {
+        let (ring, z): (Vec<P2>, f64) = match e {
+            EntityType::LwPolyline(p) if plan_normal(&p.normal) && p.vertices.len() >= 2 => {
+                let mut v: Vec<(P2, f64)> =
+                    p.vertices.iter().map(|v| ([v.location.x, v.location.y], v.bulge)).collect();
+                let explicit = v.len() > 2 && {
+                    let (a, b) = (v[0].0, v[v.len() - 1].0);
+                    (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9
+                };
+                if !(p.is_closed || explicit) {
+                    continue;
+                }
+                if explicit && !p.is_closed {
+                    v.pop();
+                }
+                (geom::flatten_bulged(&v, true, ARC_STEP), p.elevation)
+            }
+            EntityType::Polyline2D(p) if plan_normal(&p.normal) && p.is_closed() && p.vertices.len() >= 3 => {
+                let v: Vec<(P2, f64)> =
+                    p.vertices.iter().map(|v| ([v.location.x, v.location.y], v.bulge)).collect();
+                (geom::flatten_bulged(&v, true, ARC_STEP), p.elevation)
+            }
+            EntityType::Polyline(p) if p.is_closed() && p.vertices.len() >= 3 => {
+                let z = p.vertices[0].location.z;
+                (p.vertices.iter().map(|v| [v.location.x, v.location.y]).collect(), z)
+            }
+            EntityType::Circle(c) if plan_normal(&c.normal) && c.radius > 0.0 => (
+                geom::ellipse_ring([c.center.x, c.center.y], [c.radius, 0.0], 1.0, ELLIPSE_STEPS),
+                c.center.z,
+            ),
+            EntityType::Ellipse(el)
+                if plan_normal(&el.normal)
+                    && ((el.end_parameter - el.start_parameter).abs() - std::f64::consts::TAU).abs() < 1e-6 =>
+            {
+                (
+                    geom::ellipse_ring(
+                        [el.center.x, el.center.y],
+                        [el.major_axis.x, el.major_axis.y],
+                        el.minor_axis_ratio,
+                        ELLIPSE_STEPS,
+                    ),
+                    el.center.z,
+                )
+            }
+            _ => continue,
+        };
+        let ring = geom::dedup(&ring, 1e-12);
+        if ring.len() >= 3 {
+            out.push((e.common().handle, ring.into_iter().map(|p| [p[0], p[1], z]).collect()));
+        }
+    }
+    out
+}
+
 // ── Entity helpers ───────────────────────────────────────────────────────────
 
 pub fn p3(v: &Vector3) -> P3 {
@@ -233,12 +315,25 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
         "RT_HELP" | "RT_" | "RT_HELLO" => help(host),
         "RT_LIST" => list(host),
 
-        "RT_CLIP" => start_clip(host, tools::ClipKind::Keep),
-        "RT_CLIPHOLE" => start_clip(host, tools::ClipKind::Hole),
-        "RT_CUT" => start_clip(host, tools::ClipKind::Cut),
+        // The ribbon menus' own ids run their default (window) form.
+        "RT_CLIP" | "RT_CLIP_MENU" => start_clip(host, tools::ClipKind::Keep),
+        "RT_CLIPHOLE" | "RT_HOLE_MENU" => start_clip(host, tools::ClipKind::Hole),
+        "RT_CUT" | "RT_CUT_MENU" => start_clip(host, tools::ClipKind::Cut),
         "RT_CLIPAPPLY" => {
             if !args.is_empty() {
                 clip_apply(host, &args);
+            }
+        }
+
+        "RT_CLIPPOLY" => start_poly(host, tools::ClipKind::Keep),
+        "RT_HOLEPOLY" => start_poly(host, tools::ClipKind::Hole),
+        "RT_CUTPOLY" => start_poly(host, tools::ClipKind::Cut),
+        "RT_CLIPPL" => start_pline(host, tools::ClipKind::Keep),
+        "RT_HOLEPL" => start_pline(host, tools::ClipKind::Hole),
+        "RT_CUTPL" => start_pline(host, tools::ClipKind::Cut),
+        "RT_CLIPPOLYAPPLY" => {
+            if !args.is_empty() {
+                clip_poly_apply(host, &args);
             }
         }
 
@@ -350,6 +445,8 @@ fn help(host: &mut dyn HostApi) {
          RT_CLIP: ritaglia con un rettangolo (tiene l'interno; ripetuto, restringe).\n\
          RT_CLIPHOLE: nasconde la parte dentro il rettangolo.\n\
          RT_CUT: separa la parte nel rettangolo in una nuova immagine, spostabile.\n\
+         RT_CLIPPOLY / RT_HOLEPOLY / RT_CUTPOLY: come sopra, con un poligono disegnato a clic (Invio chiude).\n\
+         RT_CLIPPL / RT_HOLEPL / RT_CUTPL: come sopra, con una polilinea chiusa, un cerchio o un'ellisse esistenti.\n\
          RT_UNCLIP: toglie il ritaglio.\n\
          RT_RESIZE: ridimensiona trascinando un angolo (proporzionale).\n\
          RT_SIZE: larghezza, altezza, fattore di scala o risoluzione DPI.\n\
@@ -362,6 +459,43 @@ fn help(host: &mut dyn HostApi) {
 fn single_selected(host: &dyn HostApi) -> Option<Handle> {
     let sel = selected_images(host);
     (sel.len() == 1).then(|| sel[0])
+}
+
+fn start_poly(host: &mut dyn HostApi, kind: tools::ClipKind) {
+    let images = tools::snapshots(host);
+    if images.is_empty() {
+        host.push_error("Nel disegno non ci sono immagini raster.");
+        return;
+    }
+    let pre = single_selected(host);
+    host.start_interactive(Box::new(tools::PolyClipTool::new(images, kind, pre)));
+}
+
+fn start_pline(host: &mut dyn HostApi, kind: tools::ClipKind) {
+    let images = tools::snapshots(host);
+    if images.is_empty() {
+        host.push_error("Nel disegno non ci sono immagini raster.");
+        return;
+    }
+    let shapes = closed_shapes(host);
+    if shapes.is_empty() {
+        host.push_error(&format!(
+            "{}: nel disegno non ci sono polilinee chiuse, cerchi o ellissi da usare come contorno.",
+            kind.pline_name()
+        ));
+        return;
+    }
+    // Preselected image + outline: apply straight away.
+    let sel = host.selection();
+    let img = sel.iter().find(|h| images.iter().any(|s| s.handle == **h)).copied();
+    let shape = sel.iter().find_map(|h| shapes.iter().find(|(sh, _)| sh == h));
+    if let (Some(img), Some((_, ring))) = (img, shape) {
+        set_pending_poly(ring.clone());
+        clip_poly_apply(host, &[&hex(img), kind.keyword()]);
+        return;
+    }
+    let pre = single_selected(host);
+    host.start_interactive(Box::new(tools::PlineClipTool::new(images, shapes, kind, pre)));
 }
 
 fn start_pick(host: &mut dyn HostApi, verb: &'static str, what: &'static str) {
@@ -446,7 +580,8 @@ fn list(host: &mut dyn HostApi) {
 
 // ── Clip ────────────────────────────────────────────────────────────────────
 
-/// `RT_CLIPAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2> [z]`
+/// `RT_CLIPAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2> [z]` — a window
+/// drawn on screen (axis-aligned in the drawing).
 fn clip_apply(host: &mut dyn HostApi, args: &[&str]) {
     let usage = "Uso: RT_CLIPAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2>";
     let (Some(h), Some(mode)) = (args.first().and_then(|t| parse_handle(t)), args.get(1)) else {
@@ -459,101 +594,175 @@ fn clip_apply(host: &mut dyn HostApi, args: &[&str]) {
         return;
     };
     let z = num(args.get(6).copied()).unwrap_or(0.0);
-    let (p1, p2) = ([n[0], n[1], z], [n[2], n[3], z]);
+    let (x0, x1) = (n[0].min(n[2]), n[0].max(n[2]));
+    let (y0, y1) = (n[1].min(n[3]), n[1].max(n[3]));
+    let window = vec![[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
+    clip_region(host, h, mode, &window, false);
+}
+
+/// `RT_CLIPPOLYAPPLY <handle> KEEP|HOLE|CUT [x1 y1 x2 y2 x3 y3 ...]` — a
+/// polygon given as coordinates, or the one a tool just drew or picked.
+fn clip_poly_apply(host: &mut dyn HostApi, args: &[&str]) {
+    let usage = "Uso: RT_CLIPPOLYAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2> <x3> <y3> ...";
+    let (Some(h), Some(mode)) = (args.first().and_then(|t| parse_handle(t)), args.get(1)) else {
+        host.push_error(usage);
+        return;
+    };
+    let coords: Option<Vec<f64>> = args[2..].iter().map(|t| num(Some(t))).collect();
+    let poly: Vec<P3> = match coords {
+        Some(c) if c.len() >= 6 && c.len() % 2 == 0 => c.chunks(2).map(|p| [p[0], p[1], 0.0]).collect(),
+        Some(c) if c.is_empty() => match take_pending_poly() {
+            Some(p) => p,
+            None => {
+                host.push_error("Nessun poligono indicato.");
+                return;
+            }
+        },
+        _ => {
+            host.push_error(usage);
+            return;
+        }
+    };
+    clip_region(host, h, mode, &poly, true);
+}
+
+/// Clip image `h` with a world polygon: KEEP shows only its inside
+/// (narrowing an existing clip), HOLE hides its inside, CUT splits its
+/// inside off into a new image entity.
+fn clip_region(host: &mut dyn HostApi, h: Handle, mode: &str, world: &[P3], polygon: bool) {
+    let mode = mode.to_ascii_uppercase();
+    let (name, what) = match (mode.as_str(), polygon) {
+        ("KEEP", false) => ("RT_CLIP", "il rettangolo"),
+        ("HOLE", false) => ("RT_CLIPHOLE", "il rettangolo"),
+        ("CUT", false) => ("RT_CUT", "il rettangolo"),
+        ("KEEP", true) => ("RT_CLIPPOLY", "il poligono"),
+        ("HOLE", true) => ("RT_HOLEPOLY", "il poligono"),
+        ("CUT", true) => ("RT_CUTPOLY", "il poligono"),
+        _ => {
+            host.push_error("Modo di ritaglio sconosciuto: usa KEEP, HOLE o CUT.");
+            return;
+        }
+    };
     let Some(mut img) = fetch(host, h) else {
-        host.push_error("RT_CLIP: l'entità non è un'immagine raster.");
+        host.push_error(&format!("{name}: l'entità non è un'immagine raster."));
         return;
     };
     let f = frame(&img);
-    let Some(window) = geom::world_rect_to_px(&f, p1, p2) else {
-        host.push_error("RT_CLIP: l'immagine ha una cornice degenere.");
+    let px: Option<Vec<P2>> = world.iter().map(|&p| f.to_pixel(p)).collect();
+    let Some(px) = px else {
+        host.push_error(&format!("{name}: l'immagine ha una cornice degenere."));
         return;
     };
+    let px = geom::dedup(&px, 1e-9);
+    if px.len() >= 4 && !geom::is_simple(&px) {
+        host.push_error(&format!("{name}: {what} si interseca con se stesso; disegnalo senza lati incrociati."));
+        return;
+    }
+    if px.len() < 3 || geom::signed_area(&px).abs() < geom::MIN_AREA_PX {
+        host.push_error(&format!("{name}: {what} ha area nulla."));
+        return;
+    }
+    let full = f.full_px();
+    // The polygon trimmed to the frame (the frame is convex).
+    let on_image = geom::clip_convex(&px, &full);
 
-    match mode.to_ascii_uppercase().as_str() {
+    match mode.as_str() {
         "KEEP" => {
-            let base = visible_px(&img);
             let nested = clip_active(&img) && img.clip_boundary.clip_mode == ClipMode::Outside;
-            let region = geom::clip_convex(&base, &window);
+            let region = if !nested {
+                on_image
+            } else {
+                let base = visible_px(&img);
+                if geom::is_convex(&base) {
+                    geom::clip_convex(&px, &base)
+                } else if geom::is_convex(&px) {
+                    geom::clip_convex(&base, &px)
+                } else {
+                    host.push_info(&format!(
+                        "{name}: ritaglio precedente e nuovo contorno sono entrambi concavi; \
+                         il nuovo contorno sostituisce il precedente."
+                    ));
+                    on_image
+                }
+            };
             let Some(shape) = geom::shape_from_px(f.h, &region) else {
-                host.push_error("RT_CLIP: il rettangolo non tocca la parte visibile dell'immagine.");
+                host.push_error(&format!("{name}: {what} non tocca la parte visibile dell'immagine."));
                 return;
             };
             if clip_active(&img) && img.clip_boundary.clip_mode == ClipMode::Inside {
-                host.push_info("RT_CLIP: il foro esistente è stato sostituito dal nuovo ritaglio.");
+                host.push_info(&format!("{name}: il foro esistente è stato sostituito dal nuovo ritaglio."));
             }
             set_shape(&mut img, &shape, ClipMode::Outside);
-            host.begin_undo_group("RT_CLIP");
+            host.begin_undo_group(name);
             let ok = host.update_entity(EntityType::RasterImage(img));
             host.end_undo_group();
-            report(host, ok, if nested { "RT_CLIP: ritaglio ristretto." } else { "RT_CLIP: immagine ritagliata." });
+            let msg = if nested { "ritaglio ristretto." } else { "immagine ritagliata." };
+            report(host, ok, &format!("{name}: {msg}"));
         }
         "HOLE" => {
-            let region = geom::clip_convex(&f.full_px(), &window);
-            let Some(shape) = geom::shape_from_px(f.h, &region) else {
-                host.push_error("RT_CLIPHOLE: il rettangolo non tocca l'immagine.");
+            let Some(shape) = geom::shape_from_px(f.h, &on_image) else {
+                host.push_error(&format!("{name}: {what} non tocca l'immagine."));
                 return;
             };
-            if covers_frame(&f, &region) {
-                host.push_error("RT_CLIPHOLE: il rettangolo copre tutta l'immagine; per toglierla usa CANCELLA.");
+            if covers_frame(&f, &on_image) {
+                host.push_error(&format!("{name}: {what} copre tutta l'immagine; per toglierla usa CANCELLA."));
                 return;
             }
             if clip_active(&img) {
-                host.push_info("RT_CLIPHOLE: il ritaglio precedente è stato sostituito dal foro.");
+                host.push_info(&format!("{name}: il ritaglio precedente è stato sostituito dal foro."));
             }
             set_shape(&mut img, &shape, ClipMode::Inside);
-            host.begin_undo_group("RT_CLIPHOLE");
+            host.begin_undo_group(name);
             let ok = host.update_entity(EntityType::RasterImage(img));
             host.end_undo_group();
-            report(host, ok, "RT_CLIPHOLE: parte interna nascosta.");
+            report(host, ok, &format!("{name}: parte interna nascosta."));
         }
-        "CUT" => {
+        _ => {
+            // CUT
             if clip_active(&img) {
-                host.push_error(
-                    "RT_CUT: l'immagine è già ritagliata; togli prima il ritaglio (RT_UNCLIP) \
-                     oppure usa RT_CLIP.",
-                );
+                host.push_error(&format!(
+                    "{name}: l'immagine è già ritagliata; togli prima il ritaglio (RT_UNCLIP) \
+                     oppure usa RT_CLIP."
+                ));
                 return;
             }
-            let region = geom::clip_convex(&f.full_px(), &window);
-            let Some(shape) = geom::shape_from_px(f.h, &region) else {
-                host.push_error("RT_CUT: il rettangolo non tocca l'immagine.");
+            let Some(shape) = geom::shape_from_px(f.h, &on_image) else {
+                host.push_error(&format!("{name}: {what} non tocca l'immagine."));
                 return;
             };
-            if covers_frame(&f, &region) {
-                host.push_error("RT_CUT: il rettangolo copre tutta l'immagine: non c'è niente da separare.");
+            if covers_frame(&f, &on_image) {
+                host.push_error(&format!("{name}: {what} copre tutta l'immagine: non c'è niente da separare."));
                 return;
             }
-            // The piece: a fresh entity on the same file, clipped to the window.
+            // The piece: a fresh entity on the same file, clipped to the outline.
             let mut piece = img.clone();
             piece.common.handle = Handle::NULL;
             piece.common.reactors.clear();
             piece.common.xdictionary_handle = None;
             piece.definition_reactor_handle = None;
             set_shape(&mut piece, &shape, ClipMode::Outside);
-            // The rest: the original with the window as a hole.
+            // The rest: the original with the outline as a hole.
             set_shape(&mut img, &shape, ClipMode::Inside);
 
-            host.begin_undo_group("RT_CUT");
+            host.begin_undo_group(name);
             let ok = host.update_entity(EntityType::RasterImage(img));
             let new_handle = if ok { host.add_entity(EntityType::RasterImage(piece)) } else { Handle::NULL };
             host.end_undo_group();
             if !ok {
-                host.push_error("RT_CUT: l'immagine non può essere modificata (layer bloccato?).");
+                host.push_error(&format!("{name}: l'immagine non può essere modificata (layer bloccato?)."));
                 return;
             }
             if new_handle.is_null() {
-                host.push_error("RT_CUT: il pezzo non è stato creato.");
+                host.push_error(&format!("{name}: il pezzo non è stato creato."));
                 return;
             }
             host.set_dirty();
             let _ = host.set_selection(&[new_handle]);
             host.push_info(&format!(
-                "RT_CUT: pezzo separato ({}). È selezionato: usa SPOSTA (MOVE) per spostarlo.",
+                "{name}: pezzo separato ({}). È selezionato: usa SPOSTA (MOVE) per spostarlo.",
                 hex(new_handle)
             ));
         }
-        _ => host.push_error(usage),
     }
 }
 

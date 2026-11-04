@@ -150,7 +150,7 @@ pub enum ClipKind {
 }
 
 impl ClipKind {
-    fn keyword(self) -> &'static str {
+    pub fn keyword(self) -> &'static str {
         match self {
             ClipKind::Keep => "KEEP",
             ClipKind::Hole => "HOLE",
@@ -162,6 +162,20 @@ impl ClipKind {
             ClipKind::Keep => "RT_CLIP",
             ClipKind::Hole => "RT_CLIPHOLE",
             ClipKind::Cut => "RT_CUT",
+        }
+    }
+    fn poly_name(self) -> &'static str {
+        match self {
+            ClipKind::Keep => "RT_CLIPPOLY",
+            ClipKind::Hole => "RT_HOLEPOLY",
+            ClipKind::Cut => "RT_CUTPOLY",
+        }
+    }
+    pub fn pline_name(self) -> &'static str {
+        match self {
+            ClipKind::Keep => "RT_CLIPPL",
+            ClipKind::Hole => "RT_HOLEPL",
+            ClipKind::Cut => "RT_CUTPL",
         }
     }
     fn color(self) -> [f32; 4] {
@@ -269,6 +283,256 @@ impl InteractiveCommand for ClipTool {
                     PreviewWire::with_color(self.images[t].outline(), GREY),
                     PreviewWire::with_color(rect, self.kind.color()),
                 ]
+            }
+        }
+    }
+}
+
+// ── Polygon drawn point by point ───────────────────────────────────────────
+
+/// Pick an image, then click the polygon's vertices; Enter (or a click on
+/// the first vertex) closes it.
+pub struct PolyClipTool {
+    images: Vec<Snapshot>,
+    kind: ClipKind,
+    target: Option<usize>,
+    pts: Vec<P3>,
+    msg: Option<String>,
+}
+
+impl PolyClipTool {
+    pub fn new(images: Vec<Snapshot>, kind: ClipKind, preselected: Option<Handle>) -> Self {
+        let target = preselected.and_then(|h| index_of(&images, h));
+        PolyClipTool { images, kind, target, pts: Vec::new(), msg: None }
+    }
+
+    /// A click this close to the first vertex closes the polygon.
+    fn close_tolerance(&self) -> f64 {
+        let t = self.target.unwrap_or(0);
+        let (w, h) = self.images[t].frame.world_size();
+        (w.hypot(h) * 0.015).max(1e-9)
+    }
+
+    fn finish(&mut self) -> CommandStep {
+        if self.pts.len() < 3 {
+            self.msg = Some("servono almeno 3 vertici".into());
+            return CommandStep::NeedPoint;
+        }
+        let t = self.target.expect("target chosen before vertices");
+        commands::set_pending_poly(std::mem::take(&mut self.pts));
+        CommandStep::Dispatch(format!(
+            "RT_CLIPPOLYAPPLY {:X} {}",
+            self.images[t].handle.value(),
+            self.kind.keyword()
+        ))
+    }
+
+    fn choose(&mut self, idx: Option<usize>) -> CommandStep {
+        match idx {
+            Some(i) => {
+                self.target = Some(i);
+                self.msg = None;
+            }
+            None => self.msg = Some("non è un'immagine raster".into()),
+        }
+        CommandStep::NeedPoint
+    }
+}
+
+impl InteractiveCommand for PolyClipTool {
+    fn prompt(&self) -> String {
+        let name = self.kind.poly_name();
+        let p = match (self.target, self.pts.len()) {
+            (None, _) => format!("{name}: seleziona l'immagine"),
+            (Some(_), 0) => format!("{name}: primo vertice del poligono"),
+            (Some(_), n) if n < 3 => format!("{name}: vertice {} (Esc per annullare)", n + 1),
+            (Some(_), n) => format!("{name}: vertice {} — Invio o clic sul primo vertice per chiudere", n + 1),
+        };
+        with_msg(&self.msg, p)
+    }
+
+    fn on_point(&mut self, pt: [f64; 3]) -> CommandStep {
+        if self.target.is_none() {
+            let i = hit(&self.images, pt);
+            return self.choose(i);
+        }
+        if self.pts.len() >= 3 {
+            let f = self.pts[0];
+            if (f[0] - pt[0]).hypot(f[1] - pt[1]) <= self.close_tolerance() {
+                return self.finish();
+            }
+        }
+        if let Some(l) = self.pts.last() {
+            if (l[0] - pt[0]).abs() < 1e-12 && (l[1] - pt[1]).abs() < 1e-12 {
+                return CommandStep::NeedPoint; // double click on the same spot
+            }
+        }
+        self.msg = None;
+        self.pts.push(pt);
+        CommandStep::NeedPoint
+    }
+
+    fn on_enter(&mut self) -> CommandStep {
+        if self.target.is_none() || self.pts.is_empty() {
+            return CommandStep::Cancel;
+        }
+        self.finish()
+    }
+
+    fn needs_object_pick(&self) -> bool {
+        self.target.is_none()
+    }
+
+    fn on_object_pick(&mut self, handle: Handle, pt: [f64; 3]) -> CommandStep {
+        let i = index_of(&self.images, handle).or_else(|| hit(&self.images, pt));
+        self.choose(i)
+    }
+
+    fn on_cursor_move(&mut self, pt: [f64; 3]) -> Vec<PreviewWire> {
+        let Some(t) = self.target else {
+            return hit(&self.images, pt)
+                .map(|i| vec![PreviewWire::with_color(self.images[i].outline(), CYAN)])
+                .unwrap_or_default();
+        };
+        let mut wires = vec![PreviewWire::with_color(self.images[t].outline(), GREY)];
+        if self.pts.is_empty() {
+            return wires;
+        }
+        let mut path = self.pts.clone();
+        path.push(pt);
+        if self.pts.len() >= 2 {
+            path.push(self.pts[0]);
+        }
+        wires.push(PreviewWire::with_color(path, self.kind.color()));
+        if self.pts.len() >= 3 {
+            wires.push(PreviewWire::circle(self.pts[0], self.close_tolerance(), Some(self.kind.color())));
+        }
+        wires
+    }
+}
+
+// ── Existing closed polyline / circle / ellipse ────────────────────────────
+
+/// Pick an image, then a closed outline already in the drawing (or click
+/// inside one).
+pub struct PlineClipTool {
+    images: Vec<Snapshot>,
+    shapes: Vec<(Handle, Vec<P3>)>,
+    kind: ClipKind,
+    target: Option<usize>,
+    msg: Option<String>,
+}
+
+impl PlineClipTool {
+    pub fn new(images: Vec<Snapshot>, shapes: Vec<(Handle, Vec<P3>)>, kind: ClipKind, preselected: Option<Handle>) -> Self {
+        let target = preselected.and_then(|h| index_of(&images, h));
+        PlineClipTool { images, shapes, kind, target, msg: None }
+    }
+
+    /// The smallest outline containing a point.
+    fn shape_at(&self, pt: P3) -> Option<usize> {
+        self.shapes
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, ring))| {
+                let r: Vec<P2> = ring.iter().map(|p| [p[0], p[1]]).collect();
+                geom::point_in_polygon(&r, [pt[0], pt[1]])
+            })
+            .min_by(|a, b| {
+                let area = |ring: &Vec<P3>| {
+                    let r: Vec<P2> = ring.iter().map(|p| [p[0], p[1]]).collect();
+                    geom::signed_area(&r).abs()
+                };
+                area(&a.1 .1).total_cmp(&area(&b.1 .1))
+            })
+            .map(|(i, _)| i)
+    }
+
+    fn take_shape(&mut self, idx: Option<usize>) -> CommandStep {
+        let (Some(t), Some(i)) = (self.target, idx) else {
+            self.msg = Some("non è una polilinea chiusa, un cerchio o un'ellisse".into());
+            return CommandStep::NeedPoint;
+        };
+        commands::set_pending_poly(self.shapes[i].1.clone());
+        CommandStep::Dispatch(format!(
+            "RT_CLIPPOLYAPPLY {:X} {}",
+            self.images[t].handle.value(),
+            self.kind.keyword()
+        ))
+    }
+
+    fn ring(&self, i: usize) -> Vec<P3> {
+        ring(self.shapes[i].1.clone())
+    }
+}
+
+impl InteractiveCommand for PlineClipTool {
+    fn prompt(&self) -> String {
+        let name = self.kind.pline_name();
+        let p = match self.target {
+            None => format!("{name}: seleziona l'immagine"),
+            Some(_) => format!("{name}: seleziona la polilinea chiusa (o clicca al suo interno)"),
+        };
+        with_msg(&self.msg, p)
+    }
+
+    fn on_point(&mut self, pt: [f64; 3]) -> CommandStep {
+        match self.target {
+            None => {
+                match hit(&self.images, pt) {
+                    Some(i) => {
+                        self.target = Some(i);
+                        self.msg = None;
+                    }
+                    None => self.msg = Some("non è un'immagine raster".into()),
+                }
+                CommandStep::NeedPoint
+            }
+            Some(_) => {
+                let i = self.shape_at(pt);
+                self.take_shape(i)
+            }
+        }
+    }
+
+    fn on_enter(&mut self) -> CommandStep {
+        CommandStep::Cancel
+    }
+
+    fn needs_object_pick(&self) -> bool {
+        true
+    }
+
+    fn on_object_pick(&mut self, handle: Handle, pt: [f64; 3]) -> CommandStep {
+        match self.target {
+            None => {
+                match index_of(&self.images, handle).or_else(|| hit(&self.images, pt)) {
+                    Some(i) => {
+                        self.target = Some(i);
+                        self.msg = None;
+                    }
+                    None => self.msg = Some("non è un'immagine raster".into()),
+                }
+                CommandStep::NeedPoint
+            }
+            Some(_) => {
+                let i = self.shapes.iter().position(|(h, _)| *h == handle).or_else(|| self.shape_at(pt));
+                self.take_shape(i)
+            }
+        }
+    }
+
+    fn on_cursor_move(&mut self, pt: [f64; 3]) -> Vec<PreviewWire> {
+        match self.target {
+            None => hit(&self.images, pt)
+                .map(|i| vec![PreviewWire::with_color(self.images[i].outline(), CYAN)])
+                .unwrap_or_default(),
+            Some(t) => {
+                let mut w = vec![PreviewWire::with_color(self.images[t].outline(), GREY)];
+                if let Some(i) = self.shape_at(pt) {
+                    w.push(PreviewWire::with_color(self.ring(i), self.kind.color()));
+                }
+                w
             }
         }
     }
