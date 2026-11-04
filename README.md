@@ -1,5 +1,10 @@
 # opencad-raster-plugin — Raster Tools per Open CAD Studio
 
+> **Stato: versione iniziale (0.x), in fase di test.** Le funzioni principali sono
+> complete ma potrebbero cambiare nelle prossime versioni. Le novità di ogni
+> versione sono nel [registro delle modifiche](CHANGELOG.md). Segnalazioni e
+> suggerimenti sono benvenuti nelle [Issues](https://github.com/Macchecaspita/opencad-raster-plugin/issues).
+
 Plugin per [Open CAD Studio](https://github.com/HakanSeven12/OpenCADStudio) che
 aggiunge la scheda **Raster** per lavorare sulle immagini GIF, JPG, PNG, BMP,
 TIFF e WebP inserite nei disegni DWG/DXF:
@@ -49,10 +54,27 @@ Copia la libreria compilata **e** `plugin.toml` nella cartella
 
 e riavvia Open CAD Studio: compare la scheda **Raster**.
 
-In alternativa: carica il progetto su un tuo repository GitHub, crea un tag
-(`git tag v0.1.0 && git push --tags`): il workflow `release.yml` compila per
-Windows, Linux e macOS e pubblica la release. Poi in Open CAD Studio:
-**Plugin Manager → Add repository →** `tuo-account/opencad-raster-plugin` → *Install*.
+Oppure, senza compilare nulla, dal **Plugin Manager** di Open CAD Studio
+(comando `PLUGINS`): **Add repository →** `Macchecaspita/opencad-raster-plugin`,
+scegli l'ultima versione e premi *Install*. Le versioni pubblicate sono in
+[Releases](https://github.com/Macchecaspita/opencad-raster-plugin/releases).
+
+## Pubblicare una nuova versione
+
+1. Scrivi le novità in [CHANGELOG.md](CHANGELOG.md), sotto **[Non rilasciato]**.
+2. In PowerShell, nella cartella del progetto:
+
+   ```
+   powershell -ExecutionPolicy Bypass -File scripts\release.ps1 0.2.0
+   ```
+
+Lo script aggiorna la versione in `Cargo.toml`, `plugin.toml` e `CHANGELOG.md`,
+compila e prova il plugin, poi, dopo la tua conferma, crea il commit e il tag
+e li carica su GitHub. Il workflow `release.yml` compila per Windows, Linux e
+macOS e pubblica la release con le note prese dal CHANGELOG.
+
+Numerazione: `0.1.1` per le sole correzioni, `0.2.0` per nuove funzioni,
+`1.0.0` quando il plugin sarà considerato stabile.
 
 ## Compatibilità
 
@@ -70,6 +92,8 @@ src/commands.rs  comandi RT_* e modifiche al disegno
 src/tools.rs     strumenti interattivi (selezione, rettangolo, trascinamento) e finestre
 src/geom.rs      geometria pura: pixel ↔ disegno, ritaglio, scala (con test)
 src/imgsize.rs   dimensioni in pixel dall'intestazione del file (con test)
+scripts/release.ps1  pubblicazione di una nuova versione
+CHANGELOG.md     registro delle modifiche
 icons/           icone SVG della scheda
 ```
 

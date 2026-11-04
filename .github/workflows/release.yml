@@ -52,10 +52,32 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Check plugin.toml version matches the tag
+      - name: Check versions match the tag
         run: |
-          v=$(grep -m1 '^version' plugin.toml | cut -d'"' -f2)
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "plugin.toml version $v != tag ${GITHUB_REF_NAME}"; exit 1; }
+          tag="${GITHUB_REF_NAME#v}"
+          p=$(grep -m1 '^version' plugin.toml | cut -d'"' -f2)
+          c=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          [ "$p" = "$tag" ] || { echo "::error::plugin.toml version $p != tag $GITHUB_REF_NAME"; exit 1; }
+          [ "$c" = "$tag" ] || { echo "::error::Cargo.toml version $c != tag $GITHUB_REF_NAME"; exit 1; }
+      - name: Release notes from CHANGELOG.md
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          # The lines between "## [<version>]" and the next "## [" heading.
+          awk -v v="$tag" '
+            index($0, "## [" v "]") == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md | tr -d '\r' | sed '/./,$!d' > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no section '## [$tag]'"
+            exit 1
+          fi
+          {
+            echo
+            echo "---"
+            echo "**Installazione:** in Open CAD Studio, comando \`PLUGINS\` → *Add repository* → \`${GITHUB_REPOSITORY}\` → scegli **${GITHUB_REF_NAME}** → *Install*, poi riavvia."
+          } >> notes.md
+          cat notes.md
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -63,4 +85,7 @@ jobs:
           mkdir dist
           cp artifacts/*/* dist/
           cp plugin.toml dist/
-          gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --notes "Raster Tools ${GITHUB_REF_NAME}"
+          # Versions 0.x are marked "in fase di test" in the title.
+          title="Raster Tools ${GITHUB_REF_NAME}"
+          case "$GITHUB_REF_NAME" in v0.*) title="$title (versione di test)";; esac
+          gh release create "${GITHUB_REF_NAME}" dist/* --title "$title" --notes-file notes.md --latest
