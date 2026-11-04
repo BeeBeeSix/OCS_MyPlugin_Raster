@@ -1,0 +1,66 @@
+# Push a tag `v*` to publish a release the Open CAD Studio Plugin Manager
+# can install: one library per platform (the platform in the asset name)
+# plus plugin.toml.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            lib: libopencad_raster_plugin.so
+            asset: opencad.rastertools-linux-x86_64.so
+          - os: windows-latest
+            lib: opencad_raster_plugin.dll
+            asset: opencad.rastertools-windows-x86_64.dll
+          - os: macos-latest
+            lib: libopencad_raster_plugin.dylib
+            asset: opencad.rastertools-macos-aarch64.dylib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain
+        shell: bash
+        run: rustup toolchain install "$(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release
+      - run: cargo build --release
+      - name: Stage asset
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/release/${{ matrix.lib }}" "dist/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Check plugin.toml version matches the tag
+        run: |
+          v=$(grep -m1 '^version' plugin.toml | cut -d'"' -f2)
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "plugin.toml version $v != tag ${GITHUB_REF_NAME}"; exit 1; }
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir dist
+          cp artifacts/*/* dist/
+          cp plugin.toml dist/
+          gh release create "${GITHUB_REF_NAME}" dist/* --title "${GITHUB_REF_NAME}" --notes "Raster Tools ${GITHUB_REF_NAME}"

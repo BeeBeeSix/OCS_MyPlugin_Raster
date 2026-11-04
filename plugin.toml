@@ -1,0 +1,16 @@
+[plugin]
+id = "opencad.rastertools"
+name = "Raster Tools"
+version = "0.1.0"
+description = "Gestione immagini raster (GIF, JPG, PNG, BMP, TIFF, WebP): ritaglio rettangolare, foro e separazione di un pezzo, ridimensionamento grafico o numerico (anche a DPI), cambio del percorso su disco e ricerca dei file spostati."
+author = "Macchecaspita"
+license = "GPL-3.0-only"
+repository = "Macchecaspita/opencad-raster-plugin"
+
+[opencad]
+# Must match API_VERSION exported by the linked ocs_plugin_api.
+# Open CAD Studio v2026.44 uses API 14.
+api_version = 14
+ribbon_order = 60
+command_prefixes = ["RT_"]
+xdata_apps = []

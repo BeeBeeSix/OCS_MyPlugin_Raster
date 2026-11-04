@@ -1,0 +1,6 @@
+[toolchain]
+# Any recent stable works for an API 14 plugin (the runner protocol no longer
+# requires the host's exact compiler). Pinned to the host release's toolchain
+# for reproducible builds.
+channel = "1.99.1"
+profile = "minimal"

@@ -1,0 +1,31 @@
+[package]
+name = "opencad-raster-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Raster Tools add-on for Open CAD Studio — rectangular clip / hole / split, resize (drag, size, DPI), relink and find moved GIF/JPG/PNG/BMP/TIFF/WebP images."
+license = "GPL-3.0-only"
+repository = "https://github.com/Macchecaspita/opencad-raster-plugin"
+
+# A plugin is a C-ABI dynamic library the host loads at runtime (in its own
+# runner process). `rlib` as well so `cargo test` can link the unit tests.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The stable contract, with the runtime `host` surface (HostApi / BuiltinPlugin).
+# Pinned to the v2026.44 RELEASE TAG commit (Plugin API 14), the same pin as
+# opencad-landsurvey-plugin. The host's entity model comes re-exported as
+# `ocs_plugin_api::host::codec`, so plugin and host share one set of codec
+# types and no separate codec dependency is declared here.
+#
+# To target a newer Open CAD Studio release, replace `rev` with that release
+# tag's commit (`git ls-remote --tags https://github.com/HakanSeven12/OpenCADStudio`)
+# and update `api_version` in plugin.toml to the API_VERSION it exports.
+ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", rev = "0e77cae652271d08c7619238e619f9b6668ae17c", features = ["host"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[workspace]
