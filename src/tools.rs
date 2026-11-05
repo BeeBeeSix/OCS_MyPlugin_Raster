@@ -723,7 +723,7 @@ const SIZE_MODES: &[(&str, &str)] = &[
     ("F", "Fattore di scala"),
     ("DPI", "Risoluzione di stampa (DPI)"),
 ];
-const UNITS: &[(&str, &str)] = &[("MM", "millimetri"), ("CM", "centimetri"), ("M", "metri"), ("IN", "pollici")];
+pub const UNITS: &[(&str, &str)] = &[("MM", "millimetri"), ("CM", "centimetri"), ("M", "metri"), ("IN", "pollici")];
 const ANCHORS: &[(&str, &str)] = &[("BL", "Angolo in basso a sinistra"), ("CTR", "Centro")];
 
 pub struct SizeDialog {
@@ -932,6 +932,175 @@ impl InteractiveCommand for FindDialog {
                 CommandStep::Dispatch(format!("RT_FINDAPPLY {mode}"))
             }
             None => CommandStep::Cancel,
+        }
+    }
+}
+
+// ── RT_ATTACH: insert a new image ──────────────────────────────────────────
+
+const ATTACH_MODES: &[(&str, &str)] = &[
+    ("SCREEN", "Indica sullo schermo (punto e angolo opposto)"),
+    ("WIDTH", "Larghezza nel disegno"),
+    ("DPI", "Risoluzione di stampa (DPI)"),
+    ("PIXEL", "1 pixel = 1 unità di disegno"),
+];
+
+pub struct AttachDialog {
+    def: DialogDef,
+    done: bool,
+}
+
+impl AttachDialog {
+    /// `unit_index` preselects the drawing unit (index into `UNITS`).
+    pub fn new(default_path: String, unit_index: usize) -> Self {
+        let def = DialogDef::new("Inserisci immagine raster")
+            .with_control(DialogControl::FilePicker {
+                id: "file".into(),
+                label: "File immagine".into(),
+                default_path,
+                filter_name: "Immagini raster".into(),
+                extensions: EXTENSIONS.iter().map(|e| e.to_string()).collect(),
+                save: false,
+            })
+            .with_control(choice("mode", "Dimensione", &ATTACH_MODES.iter().map(|m| m.1).collect::<Vec<_>>(), 0))
+            .with_control(number("width", "Larghezza (unità di disegno)", 100.0))
+            .with_control(number("dpi", "DPI", 300.0))
+            .with_control(choice(
+                "unit",
+                "Unità del disegno (per DPI)",
+                &UNITS.iter().map(|u| u.1).collect::<Vec<_>>(),
+                unit_index.min(UNITS.len() - 1),
+            ))
+            .with_control(info(
+                "L'immagine viene inserita sul layer corrente, con l'angolo in basso a sinistra \
+                 nel punto indicato. Il file resta collegato (non viene copiato nel disegno)."
+                    .into(),
+            ))
+            .submit_label("Inserisci")
+            .cancel_label("Annulla")
+            .width(540.0);
+        AttachDialog { def, done: false }
+    }
+}
+
+impl InteractiveCommand for AttachDialog {
+    fn prompt(&self) -> String {
+        "RT_ATTACH: scegli il file e la dimensione nella finestra".into()
+    }
+    fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+        CommandStep::NeedPoint
+    }
+    fn on_enter(&mut self) -> CommandStep {
+        CommandStep::Cancel
+    }
+    fn modal_dialog(&self) -> Option<DialogDef> {
+        (!self.done).then(|| self.def.clone())
+    }
+    fn on_dialog_response(&mut self, response: DialogResponse) -> CommandStep {
+        self.done = true;
+        let DialogResponse::Submitted(m) = response else {
+            return CommandStep::Cancel;
+        };
+        let Some(path) = get_path(&m, "file") else {
+            return CommandStep::Cancel;
+        };
+        commands::set_pending_path(path);
+        let mode = ATTACH_MODES[get_choice(&m, "mode").min(ATTACH_MODES.len() - 1)].0;
+        let unit = UNITS[get_choice(&m, "unit").min(UNITS.len() - 1)].0;
+        CommandStep::Dispatch(format!(
+            "RT_ATTACHPLACE {} {} {} {}",
+            mode,
+            get_num(&m, "width").unwrap_or(0.0),
+            get_num(&m, "dpi").unwrap_or(0.0),
+            unit
+        ))
+    }
+}
+
+/// Place a new image: click the insertion corner, then (when the size is
+/// not fixed yet) the opposite corner — proportional. Enter at the second
+/// step uses 1 pixel = 1 unit.
+pub struct AttachTool {
+    path: String,
+    w: f64,
+    h: f64,
+    /// Size of one pixel in drawing units, when already decided.
+    px: Option<f64>,
+    ins: Option<P3>,
+    msg: Option<String>,
+}
+
+impl AttachTool {
+    pub fn new(path: String, w: u32, h: u32, px: Option<f64>) -> Self {
+        AttachTool { path, w: w as f64, h: h as f64, px, ins: None, msg: None }
+    }
+
+    fn frame_ring(&self, corner: P3, px: f64) -> Vec<P3> {
+        let (ww, hh, z) = (self.w * px, self.h * px, corner[2]);
+        vec![
+            corner,
+            [corner[0] + ww, corner[1], z],
+            [corner[0] + ww, corner[1] + hh, z],
+            [corner[0], corner[1] + hh, z],
+            corner,
+        ]
+    }
+
+    fn finish(&mut self, corner: P3, px: f64) -> CommandStep {
+        commands::set_pending_path(self.path.clone());
+        CommandStep::Dispatch(format!("RT_ATTACHAPPLY {} {} {} {}", corner[0], corner[1], corner[2], px))
+    }
+}
+
+impl InteractiveCommand for AttachTool {
+    fn prompt(&self) -> String {
+        let name = commands::file_name_only(&self.path);
+        let p = match (self.ins, self.px) {
+            (None, _) => format!("RT_ATTACH {name}: punto di inserimento (angolo in basso a sinistra)"),
+            (Some(_), _) => format!("RT_ATTACH {name}: angolo opposto (Invio = 1 pixel per unità)"),
+        };
+        with_msg(&self.msg, p)
+    }
+
+    fn on_point(&mut self, pt: [f64; 3]) -> CommandStep {
+        if let Some(px) = self.px {
+            return self.finish(pt, px);
+        }
+        match self.ins {
+            None => {
+                self.ins = Some(pt);
+                CommandStep::NeedPoint
+            }
+            Some(a) => match geom::fit_proportional(a, pt, self.w, self.h) {
+                Some((corner, px)) => self.finish(corner, px),
+                None => {
+                    self.msg = Some("l'angolo opposto coincide con il primo".into());
+                    CommandStep::NeedPoint
+                }
+            },
+        }
+    }
+
+    fn on_enter(&mut self) -> CommandStep {
+        match self.ins {
+            Some(a) if self.px.is_none() => self.finish(a, 1.0),
+            _ => CommandStep::Cancel,
+        }
+    }
+
+    fn on_cursor_move(&mut self, pt: [f64; 3]) -> Vec<PreviewWire> {
+        if let Some(px) = self.px {
+            return vec![PreviewWire::with_color(self.frame_ring(pt, px), CYAN)];
+        }
+        match self.ins {
+            None => Vec::new(),
+            Some(a) => match geom::fit_proportional(a, pt, self.w, self.h) {
+                Some((corner, px)) => vec![
+                    PreviewWire::with_color(self.frame_ring(corner, px), CYAN),
+                    PreviewWire::line(a, pt, Some(GREY)),
+                ],
+                None => Vec::new(),
+            },
         }
     }
 }

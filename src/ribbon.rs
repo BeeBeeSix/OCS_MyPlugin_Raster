@@ -67,6 +67,10 @@ impl CadModule for RasterModule {
         GROUPS.get_or_init(|| {
             vec![
                 RibbonGroup {
+                    title: "Inserisci",
+                    tools: vec![cmd("RT_ATTACH", "Inserisci immagine", include_bytes!("../icons/attach.svg"))],
+                },
+                RibbonGroup {
                     title: "Ritaglio",
                     tools: vec![
                         clip_menu("RT_CLIP_MENU", "Ritaglia", CLIP, ["RT_CLIP", "RT_CLIPPOLY", "RT_CLIPPL"]),

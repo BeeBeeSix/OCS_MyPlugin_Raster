@@ -480,12 +480,39 @@ pub fn ellipse_ring(center: P2, major: P2, ratio: f64, steps: usize) -> Vec<P2> 
         .collect()
 }
 
+/// Proportional placement of a `w × h` pixel image from a fixed corner
+/// `anchor` towards `cursor` (any quadrant): the frame is as large as needed
+/// to reach the cursor along x or y. Returns the bottom-left corner and the
+/// size of one pixel in drawing units.
+pub fn fit_proportional(anchor: P3, cursor: P3, w: f64, h: f64) -> Option<(P3, f64)> {
+    let (dx, dy) = (cursor[0] - anchor[0], cursor[1] - anchor[1]);
+    let k = (dx.abs() / w).max(dy.abs() / h);
+    if !(k.is_finite() && k > 1e-12) {
+        return None;
+    }
+    let (ww, hh) = (k * w, k * h);
+    let x0 = if dx < 0.0 { anchor[0] - ww } else { anchor[0] };
+    let y0 = if dy < 0.0 { anchor[1] - hh } else { anchor[1] };
+    Some(([x0, y0, anchor[2]], k))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn near(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn proportional_fit_any_quadrant() {
+        // 200 x 100 px; cursor 50 right, 10 up → width rules: 0.25/px.
+        let (c, k) = fit_proportional([10.0, 10.0, 0.0], [60.0, 20.0, 0.0], 200.0, 100.0).unwrap();
+        assert!(near(k, 0.25) && near(c[0], 10.0) && near(c[1], 10.0));
+        // cursor down-left, height rules: 40/100 = 0.4/px → 80 x 40 frame.
+        let (c, k) = fit_proportional([10.0, 10.0, 0.0], [0.0, -30.0, 0.0], 200.0, 100.0).unwrap();
+        assert!(near(k, 0.4) && near(c[0], -70.0) && near(c[1], -30.0));
+        assert!(fit_proportional([1.0, 1.0, 0.0], [1.0, 1.0, 0.0], 10.0, 10.0).is_none());
     }
 
     #[test]

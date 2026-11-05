@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use ocs_plugin_api::host::codec;
-use ocs_plugin_api::host::HostApi;
+use ocs_plugin_api::host::{HostApi, HostSettingValue};
 
 use codec::entities::{ClipBoundary, ClipMode, ClipType, ImageDisplayFlags, RasterImage};
 use codec::objects::ObjectType;
@@ -313,6 +313,21 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
 
     match verb.as_str() {
         "RT_HELP" | "RT_" | "RT_HELLO" => help(host),
+
+        "RT_ATTACH" => {
+            let unit = drawing_unit_index(host);
+            host.start_interactive(Box::new(tools::AttachDialog::new(rest.trim_matches('"').to_string(), unit)));
+        }
+        "RT_ATTACHPLACE" => {
+            if !args.is_empty() {
+                attach_place(host, &args);
+            }
+        }
+        "RT_ATTACHAPPLY" => {
+            if !args.is_empty() {
+                attach_apply(host, &args);
+            }
+        }
         "RT_LIST" => list(host),
 
         // The ribbon menus' own ids run their default (window) form.
@@ -442,6 +457,7 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
 fn help(host: &mut dyn HostApi) {
     host.push_info(
         "Raster Tools — immagini GIF/JPG/PNG/BMP/TIFF/WebP.\n\
+         RT_ATTACH: inserisce un'immagine nel disegno (a schermo, per larghezza, a DPI o 1 pixel = 1 unità).\n\
          RT_CLIP: ritaglia con un rettangolo (tiene l'interno; ripetuto, restringe).\n\
          RT_CLIPHOLE: nasconde la parte dentro il rettangolo.\n\
          RT_CUT: separa la parte nel rettangolo in una nuova immagine, spostabile.\n\
@@ -533,6 +549,134 @@ fn start_path_dialog(host: &mut dyn HostApi, handles: Vec<Handle>) {
     };
     let found = resolve(&first.file_path, dwg_dir(host).as_deref()).is_some();
     host.start_interactive(Box::new(tools::PathDialog::new(handles, first.file_path.clone(), found)));
+}
+
+// ── RT_ATTACH ───────────────────────────────────────────────────────────────
+
+/// `INSUNITS` → index into `tools::UNITS` (mm, cm, m, inches); mm when unknown.
+fn drawing_unit_index(host: &dyn HostApi) -> usize {
+    let code = match host.system_variable("INSUNITS") {
+        Some(HostSettingValue::Number(n)) => n as i64,
+        Some(HostSettingValue::Text(t)) => t.trim().parse().unwrap_or(0),
+        _ => 0,
+    };
+    match code {
+        5 => 1, // centimetres
+        6 => 2, // metres
+        1 => 3, // inches
+        _ => 0, // millimetres
+    }
+}
+
+/// `RT_ATTACHPLACE SCREEN|WIDTH|DPI|PIXEL <width> <dpi> MM|CM|M|IN` — after
+/// the dialog: check the chosen file and start placing it.
+fn attach_place(host: &mut dyn HostApi, args: &[&str]) {
+    let Some(path) = take_pending_path() else {
+        host.push_error("RT_ATTACH: nessun file scelto.");
+        return;
+    };
+    let p = Path::new(&path);
+    if !p.is_file() {
+        host.push_error(&format!("RT_ATTACH: il file \"{path}\" non esiste."));
+        return;
+    }
+    let (w, h) = match imgsize::read_dims(p) {
+        Ok(d) if d.0 > 0 && d.1 > 0 => d,
+        _ => {
+            host.push_error(&format!(
+                "RT_ATTACH: \"{}\" non è un'immagine GIF, JPG, PNG, BMP, TIFF o WebP leggibile.",
+                file_name_only(&path)
+            ));
+            return;
+        }
+    };
+    let mode = args[0].to_ascii_uppercase();
+    let width = num(args.get(1).copied());
+    let dpi = num(args.get(2).copied());
+    let unit = args.get(3).copied().unwrap_or("MM");
+    let px = match mode.as_str() {
+        "SCREEN" => None,
+        "PIXEL" => Some(1.0),
+        "WIDTH" => match width {
+            Some(v) if v > 0.0 => Some(v / w as f64),
+            _ => {
+                host.push_error("RT_ATTACH: indica una larghezza maggiore di zero.");
+                return;
+            }
+        },
+        "DPI" => match (dpi, geom::units_per_inch(unit)) {
+            (Some(d), Some(upi)) if d > 0.0 => Some(upi / d),
+            _ => {
+                host.push_error("RT_ATTACH: indica un valore DPI maggiore di zero.");
+                return;
+            }
+        },
+        _ => {
+            host.push_error("Uso: RT_ATTACHPLACE SCREEN|WIDTH|DPI|PIXEL <larghezza> <dpi> MM|CM|M|IN");
+            return;
+        }
+    };
+    if let Some(px) = px {
+        host.push_info(&format!(
+            "RT_ATTACH: {} — {}×{} px, {} × {} unità.",
+            file_name_only(&path),
+            w,
+            h,
+            fmt_len(w as f64 * px),
+            fmt_len(h as f64 * px)
+        ));
+    }
+    host.start_interactive(Box::new(tools::AttachTool::new(path, w, h, px)));
+}
+
+/// `RT_ATTACHAPPLY <x> <y> <z> <pixel_size>` — insert the pending file with
+/// its bottom-left corner at x,y,z.
+fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
+    let vals: Option<Vec<f64>> = (0..4).map(|i| num(args.get(i).copied())).collect();
+    let (Some(v), Some(path)) = (vals, take_pending_path()) else {
+        host.push_error("Uso: RT_ATTACHAPPLY <x> <y> <z> <dimensione_pixel> (dopo la scelta del file)");
+        return;
+    };
+    let px = v[3];
+    if !valid_factor(px) {
+        host.push_error("RT_ATTACH: dimensione non valida.");
+        return;
+    }
+    let (w, h) = match imgsize::read_dims(Path::new(&path)) {
+        Ok(d) => d,
+        Err(e) => {
+            host.push_error(&format!("RT_ATTACH: impossibile leggere \"{path}\": {e}"));
+            return;
+        }
+    };
+    let mut img = RasterImage::new(&path, Vector3::new(v[0], v[1], v[2]), w as f64, h as f64);
+    img.u_vector = Vector3::new(px, 0.0, 0.0);
+    img.v_vector = Vector3::new(0.0, px, 0.0);
+    if let Some(HostSettingValue::Text(layer)) = host.system_variable("CLAYER") {
+        if !layer.trim().is_empty() {
+            img.common.layer = layer;
+        }
+    }
+    host.begin_undo_group("RT_ATTACH");
+    let handle = host.add_entity(EntityType::RasterImage(img));
+    host.end_undo_group();
+    if handle.is_null() {
+        host.push_error(&format!(
+            "RT_ATTACH: il CAD non è riuscito a inserire \"{}\" (file non leggibile o layer bloccato).",
+            file_name_only(&path)
+        ));
+        return;
+    }
+    host.set_dirty();
+    let _ = host.set_selection(&[handle]);
+    host.push_info(&format!(
+        "RT_ATTACH: inserita {} ({}×{} px, {} × {} unità).",
+        file_name_only(&path),
+        w,
+        h,
+        fmt_len(w as f64 * px),
+        fmt_len(h as f64 * px)
+    ));
 }
 
 // ── RT_LIST ─────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ che gestisce le immagini raster collegate al disegno (entità IMAGE):
 GIF, JPG, PNG, BMP, TIFF e WebP — gli stessi formati che il CAD visualizza.
 
 Tutti i comandi hanno il prefisso `RT_`. La scheda **Raster** della barra
-multifunzione li raccoglie in tre gruppi: *Ritaglio*, *Dimensioni*, *File*.
+multifunzione li raccoglie in quattro gruppi: *Inserisci*, *Ritaglio*, *Dimensioni*, *File*.
 Nel gruppo *Ritaglio*, i pulsanti *Ritaglia*, *Foro* e *Separa pezzo* hanno un
 menu (freccia ▾) per scegliere il contorno: **Rettangolo**, **Poligono** o
 **Da polilinea**; il clic sul pulsante usa il rettangolo.
@@ -18,6 +18,7 @@ Ogni modifica è un solo passo di annullamento (`U` / Ctrl+Z).
 
 | Comando | Barra | Cosa fa |
 |---|---|---|
+| `RT_ATTACH` | Inserisci › Inserisci immagine | **Inserisce una nuova immagine** nel disegno. Una finestra chiede il file e come dimensionarlo: *indicata sullo schermo* (punto di inserimento e angolo opposto, proporzionale; Invio al secondo punto = 1 pixel per unità), *larghezza nel disegno*, *risoluzione DPI* (con l'unità del disegno, proposta in base a `INSUNITS`) oppure *1 pixel = 1 unità*. Poi si clicca il punto di inserimento (angolo in basso a sinistra). L'immagine va sul **layer corrente**; il file resta collegato, non viene copiato nel disegno. |
 | `RT_CLIP` | Ritaglio › Ritaglia | Ritaglio rettangolare: si sceglie l'immagine (o la si seleziona prima), poi due angoli. Resta visibile **solo l'interno** del rettangolo. Ripetuto su un'immagine già ritagliata, **restringe** il ritaglio (intersezione). Se l'immagine è ruotata, il rettangolo disegnato a schermo diventa un contorno poligonale. |
 | `RT_CLIPHOLE` | Ritaglio › Foro | Come sopra, ma **nasconde l'interno** del rettangolo (ritaglio invertito). |
 | `RT_CUT` | Ritaglio › Separa pezzo | "Forbici": la parte nel rettangolo diventa una **nuova immagine** (stesso file, ritagliata sul rettangolo) e nell'originale resta un foro al suo posto. Il pezzo resta selezionato: con `SPOSTA`/`MOVE` lo si porta dove serve. Richiede un'immagine non ancora ritagliata. |

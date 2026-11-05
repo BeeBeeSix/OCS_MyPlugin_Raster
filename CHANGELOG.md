@@ -12,6 +12,16 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.3.0] - 2026-11-05
+
+### Aggiunto
+- **Inserimento di immagini** nel disegno (`RT_ATTACH`, pulsante *Inserisci immagine*):
+  si sceglie il file (GIF, JPG, PNG, BMP, TIFF, WebP) e la dimensione — indicata a
+  schermo con due punti (proporzionale), per larghezza, per risoluzione DPI oppure
+  1 pixel = 1 unità — poi si clicca il punto di inserimento. L'immagine va sul layer
+  corrente e il file resta collegato; l'unità per i DPI è proposta in base alle
+  unità del disegno.
+
 ## [0.2.0] - 2026-11-04
 
 ### Aggiunto
