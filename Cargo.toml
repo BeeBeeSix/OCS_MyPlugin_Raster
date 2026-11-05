@@ -1,6 +1,6 @@
 [package]
 name = "opencad-raster-plugin"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Raster Tools add-on for Open CAD Studio — rectangular clip / hole / split, resize (drag, size, DPI), relink and find moved GIF/JPG/PNG/BMP/TIFF/WebP images."
 license = "GPL-3.0-only"
@@ -29,3 +29,10 @@ codegen-units = 1
 strip = "debuginfo"
 
 [workspace]
+
+# The DWG library the host's codec is built on moved from
+# github.com/HakanSeven12/acadrust (no longer public) back to its author's
+# repository. Same commit, new address: without this, a fresh build cannot
+# download it.
+[patch."https://github.com/HakanSeven12/acadrust.git"]
+acadrust = { git = "https://github.com/hakanaktt/acadrust.git", rev = "53e6420c4df4d207409798c2719d32fc6cf2811d" }

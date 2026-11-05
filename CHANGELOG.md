@@ -12,6 +12,14 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.3.1] - 2026-11-05
+
+### Corretto
+- La compilazione su GitHub non riusciva più: la libreria DWG `acadrust`, da cui
+  dipende Open CAD Studio, è stata spostata in un altro repository. Il plugin ora la
+  scarica dal nuovo indirizzo (stessa versione, nessun cambiamento di funzioni).
+  Questa versione pubblica anche l'inserimento di immagini della 0.3.0.
+
 ## [0.3.0] - 2026-11-05
 
 ### Aggiunto
