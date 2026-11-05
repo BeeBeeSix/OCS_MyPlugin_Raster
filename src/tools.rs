@@ -105,7 +105,7 @@ impl PickTool {
         match idx {
             Some(i) => CommandStep::Dispatch(format!("{} {:X}", self.verb, self.images[i].handle.value())),
             None => {
-                self.msg = Some("non è un'immagine raster".into());
+                self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into());
                 CommandStep::NeedPoint
             }
         }
@@ -114,7 +114,7 @@ impl PickTool {
 
 impl InteractiveCommand for PickTool {
     fn prompt(&self) -> String {
-        with_msg(&self.msg, format!("Seleziona l'immagine da {} (Invio per annullare)", self.what))
+        with_msg(&self.msg, tr!(format!("Seleziona l'immagine da {} (Invio per annullare)", self.what), format!("Select the image to {} (Enter to cancel)", self.what)))
     }
     fn on_point(&mut self, pt: [f64; 3]) -> CommandStep {
         let i = hit(&self.images, pt);
@@ -207,7 +207,7 @@ impl ClipTool {
                 self.target = Some(i);
                 self.msg = None;
             }
-            None => self.msg = Some("non è un'immagine raster".into()),
+            None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
         }
         CommandStep::NeedPoint
     }
@@ -216,9 +216,9 @@ impl ClipTool {
 impl InteractiveCommand for ClipTool {
     fn prompt(&self) -> String {
         let p = match (self.target, self.first) {
-            (None, _) => format!("{}: seleziona l'immagine", self.kind.name()),
-            (Some(_), None) => format!("{}: primo angolo del rettangolo", self.kind.name()),
-            (Some(_), Some(_)) => format!("{}: angolo opposto", self.kind.name()),
+            (None, _) => tr!(format!("{}: seleziona l'immagine", self.kind.name()), format!("{}: select the image", self.kind.name())),
+            (Some(_), None) => tr!(format!("{}: primo angolo del rettangolo", self.kind.name()), format!("{}: first corner of the rectangle", self.kind.name())),
+            (Some(_), Some(_)) => tr!(format!("{}: angolo opposto", self.kind.name()), format!("{}: opposite corner", self.kind.name())),
         };
         with_msg(&self.msg, p)
     }
@@ -233,7 +233,7 @@ impl InteractiveCommand for ClipTool {
             return CommandStep::NeedPoint;
         };
         if (p1[0] - pt[0]).abs() < 1e-12 || (p1[1] - pt[1]).abs() < 1e-12 {
-            self.msg = Some("il rettangolo ha area nulla".into());
+            self.msg = Some(tr!("il rettangolo ha area nulla", "the rectangle has zero area").into());
             return CommandStep::NeedPoint;
         }
         CommandStep::Dispatch(format!(
@@ -315,7 +315,7 @@ impl PolyClipTool {
 
     fn finish(&mut self) -> CommandStep {
         if self.pts.len() < 3 {
-            self.msg = Some("servono almeno 3 vertici".into());
+            self.msg = Some(tr!("servono almeno 3 vertici", "at least 3 vertices are needed").into());
             return CommandStep::NeedPoint;
         }
         let t = self.target.expect("target chosen before vertices");
@@ -333,7 +333,7 @@ impl PolyClipTool {
                 self.target = Some(i);
                 self.msg = None;
             }
-            None => self.msg = Some("non è un'immagine raster".into()),
+            None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
         }
         CommandStep::NeedPoint
     }
@@ -343,10 +343,13 @@ impl InteractiveCommand for PolyClipTool {
     fn prompt(&self) -> String {
         let name = self.kind.poly_name();
         let p = match (self.target, self.pts.len()) {
-            (None, _) => format!("{name}: seleziona l'immagine"),
-            (Some(_), 0) => format!("{name}: primo vertice del poligono"),
-            (Some(_), n) if n < 3 => format!("{name}: vertice {} (Esc per annullare)", n + 1),
-            (Some(_), n) => format!("{name}: vertice {} — Invio o clic sul primo vertice per chiudere", n + 1),
+            (None, _) => tr!(format!("{name}: seleziona l'immagine"), format!("{name}: select the image")),
+            (Some(_), 0) => tr!(format!("{name}: primo vertice del poligono"), format!("{name}: first vertex of the polygon")),
+            (Some(_), n) if n < 3 => tr!(format!("{name}: vertice {} (Esc per annullare)", n + 1), format!("{name}: vertex {} (Esc to cancel)", n + 1)),
+            (Some(_), n) => tr!(
+                format!("{name}: vertice {} — Invio o clic sul primo vertice per chiudere", n + 1),
+                format!("{name}: vertex {} — Enter or click the first vertex to close", n + 1)
+            ),
         };
         with_msg(&self.msg, p)
     }
@@ -450,7 +453,7 @@ impl PlineClipTool {
 
     fn take_shape(&mut self, idx: Option<usize>) -> CommandStep {
         let (Some(t), Some(i)) = (self.target, idx) else {
-            self.msg = Some("non è una polilinea chiusa, un cerchio o un'ellisse".into());
+            self.msg = Some(tr!("non è una polilinea chiusa, un cerchio o un'ellisse", "not a closed polyline, circle or ellipse").into());
             return CommandStep::NeedPoint;
         };
         commands::set_pending_poly(self.shapes[i].1.clone());
@@ -470,8 +473,11 @@ impl InteractiveCommand for PlineClipTool {
     fn prompt(&self) -> String {
         let name = self.kind.pline_name();
         let p = match self.target {
-            None => format!("{name}: seleziona l'immagine"),
-            Some(_) => format!("{name}: seleziona la polilinea chiusa (o clicca al suo interno)"),
+            None => tr!(format!("{name}: seleziona l'immagine"), format!("{name}: select the image")),
+            Some(_) => tr!(
+                format!("{name}: seleziona la polilinea chiusa (o clicca al suo interno)"),
+                format!("{name}: select the closed polyline (or click inside it)")
+            ),
         };
         with_msg(&self.msg, p)
     }
@@ -484,7 +490,7 @@ impl InteractiveCommand for PlineClipTool {
                         self.target = Some(i);
                         self.msg = None;
                     }
-                    None => self.msg = Some("non è un'immagine raster".into()),
+                    None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
                 }
                 CommandStep::NeedPoint
             }
@@ -511,7 +517,7 @@ impl InteractiveCommand for PlineClipTool {
                         self.target = Some(i);
                         self.msg = None;
                     }
-                    None => self.msg = Some("non è un'immagine raster".into()),
+                    None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
                 }
                 CommandStep::NeedPoint
             }
@@ -563,9 +569,17 @@ impl ResizeTool {
 impl InteractiveCommand for ResizeTool {
     fn prompt(&self) -> String {
         let p = match (self.target, self.anchor) {
-            (None, _) => "RT_RESIZE: seleziona l'immagine".to_string(),
-            (Some(_), None) => "RT_RESIZE: clicca vicino all'angolo che deve restare fermo".to_string(),
-            (Some(_), Some(_)) => "RT_RESIZE: porta l'angolo opposto alla nuova posizione".to_string(),
+            (None, _) => tr!("RT_RESIZE: seleziona l'immagine", "RT_RESIZE: select the image").to_string(),
+            (Some(_), None) => tr!(
+                "RT_RESIZE: clicca vicino all'angolo che deve restare fermo",
+                "RT_RESIZE: click near the corner that must stay fixed"
+            )
+            .to_string(),
+            (Some(_), Some(_)) => tr!(
+                "RT_RESIZE: porta l'angolo opposto alla nuova posizione",
+                "RT_RESIZE: move the opposite corner to its new position"
+            )
+            .to_string(),
         };
         with_msg(&self.msg, p)
     }
@@ -577,7 +591,7 @@ impl InteractiveCommand for ResizeTool {
                     self.target = Some(i);
                     self.msg = None;
                 }
-                None => self.msg = Some("non è un'immagine raster".into()),
+                None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
             }
             return CommandStep::NeedPoint;
         };
@@ -588,7 +602,7 @@ impl InteractiveCommand for ResizeTool {
         };
         let k = geom::drag_factor(anchor_w, opp_w, pt);
         if !(k.is_finite() && k > 1e-6) {
-            self.msg = Some("porta l'angolo dalla parte dell'immagine".into());
+            self.msg = Some(tr!("porta l'angolo dalla parte dell'immagine", "move the corner towards the image").into());
             return CommandStep::NeedPoint;
         }
         CommandStep::Dispatch(format!(
@@ -615,7 +629,7 @@ impl InteractiveCommand for ResizeTool {
                 self.target = Some(i);
                 self.msg = None;
             }
-            None => self.msg = Some("non è un'immagine raster".into()),
+            None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
         }
         CommandStep::NeedPoint
     }
@@ -716,15 +730,27 @@ fn get_path(m: &HashMap<String, DialogValue>, id: &str) -> Option<String> {
 
 // ── RT_SIZE dialog ──────────────────────────────────────────────────────────
 
-const SIZE_MODES: &[(&str, &str)] = &[
-    ("W", "Larghezza (proporzionale)"),
-    ("H", "Altezza (proporzionale)"),
-    ("WH", "Larghezza e altezza (libere)"),
-    ("F", "Fattore di scala"),
-    ("DPI", "Risoluzione di stampa (DPI)"),
+/// Choice lists: (code sent to the apply command, Italian label, English label).
+type Options = &'static [(&'static str, &'static str, &'static str)];
+
+fn labels(opts: Options) -> Vec<&'static str> {
+    opts.iter().map(|o| tr!(o.1, o.2)).collect()
+}
+
+const SIZE_MODES: Options = &[
+    ("W", "Larghezza (proporzionale)", "Width (proportional)"),
+    ("H", "Altezza (proporzionale)", "Height (proportional)"),
+    ("WH", "Larghezza e altezza (libere)", "Width and height (free)"),
+    ("F", "Fattore di scala", "Scale factor"),
+    ("DPI", "Risoluzione di stampa (DPI)", "Print resolution (DPI)"),
 ];
-pub const UNITS: &[(&str, &str)] = &[("MM", "millimetri"), ("CM", "centimetri"), ("M", "metri"), ("IN", "pollici")];
-const ANCHORS: &[(&str, &str)] = &[("BL", "Angolo in basso a sinistra"), ("CTR", "Centro")];
+pub const UNITS: Options = &[
+    ("MM", "millimetri", "millimetres"),
+    ("CM", "centimetri", "centimetres"),
+    ("M", "metri", "metres"),
+    ("IN", "pollici", "inches"),
+];
+const ANCHORS: Options = &[("BL", "Angolo in basso a sinistra", "Bottom-left corner"), ("CTR", "Centro", "Centre")];
 
 pub struct SizeDialog {
     handles: Vec<Handle>,
@@ -737,31 +763,28 @@ impl SizeDialog {
         let f = frame(first);
         let (w, h) = f.world_size();
         let clipped = commands::clip_active(first);
-        let header = format!(
-            "{} immagine/i. {}: {} × {} px, cornice {:.4} × {:.4} unità di disegno.",
-            handles.len(),
-            commands::file_name_only(&first.file_path),
-            first.size.x as u64,
-            first.size.y as u64,
-            w,
-            h
+        let (n, name) = (handles.len(), commands::file_name_only(&first.file_path));
+        let (px_w, px_h) = (first.size.x as u64, first.size.y as u64);
+        let header = tr!(
+            format!("{n} immagine/i. {name}: {px_w} × {px_h} px, cornice {w:.4} × {h:.4} unità di disegno."),
+            format!("{n} image(s). {name}: {px_w} × {px_h} px, frame {w:.4} × {h:.4} drawing units.")
         );
-        let mut def = DialogDef::new("Dimensioni immagine raster")
+        let mut def = DialogDef::new(tr!("Dimensioni immagine raster", "Raster image size"))
             .with_control(info(header))
-            .with_control(choice("mode", "Modo", &SIZE_MODES.iter().map(|m| m.1).collect::<Vec<_>>(), 0))
-            .with_control(number("width", "Larghezza", w))
-            .with_control(number("height", "Altezza", h))
-            .with_control(number("factor", "Fattore di scala", 1.0))
+            .with_control(choice("mode", tr!("Modo", "Mode"), &labels(SIZE_MODES), 0))
+            .with_control(number("width", tr!("Larghezza", "Width"), w))
+            .with_control(number("height", tr!("Altezza", "Height"), h))
+            .with_control(number("factor", tr!("Fattore di scala", "Scale factor"), 1.0))
             .with_control(number("dpi", "DPI", 300.0))
-            .with_control(choice("unit", "Unità del disegno (per DPI)", &UNITS.iter().map(|u| u.1).collect::<Vec<_>>(), 0))
-            .with_control(choice("anchor", "Punto fisso", &ANCHORS.iter().map(|a| a.1).collect::<Vec<_>>(), 0))
+            .with_control(choice("unit", tr!("Unità del disegno (per DPI)", "Drawing units (for DPI)"), &labels(UNITS), 0))
+            .with_control(choice("anchor", tr!("Punto fisso", "Fixed point"), &labels(ANCHORS), 0))
             .with_control(DialogControl::Checkbox {
                 id: "visible".into(),
-                label: "Misure riferite alla parte visibile (ritagliata)".into(),
+                label: tr!("Misure riferite alla parte visibile (ritagliata)", "Sizes refer to the visible (clipped) part").into(),
                 default: clipped,
             })
-            .submit_label("Applica")
-            .cancel_label("Annulla");
+            .submit_label(tr!("Applica", "Apply"))
+            .cancel_label(tr!("Annulla", "Cancel"));
         def = def.width(460.0);
         SizeDialog { handles, def, done: false }
     }
@@ -769,7 +792,7 @@ impl SizeDialog {
 
 impl InteractiveCommand for SizeDialog {
     fn prompt(&self) -> String {
-        "RT_SIZE: imposta le dimensioni nella finestra".into()
+        tr!("RT_SIZE: imposta le dimensioni nella finestra", "RT_SIZE: set the size in the dialog").into()
     }
     fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
         CommandStep::NeedPoint
@@ -815,24 +838,31 @@ pub struct PathDialog {
 
 impl PathDialog {
     pub fn new(handles: Vec<Handle>, current: String, found: bool) -> Self {
-        let state = if found { "file trovato" } else { "FILE MANCANTE" };
-        let def = DialogDef::new("Percorso immagine raster")
-            .with_control(info(format!("Percorso attuale ({state}):\n{current}")))
+        let state = if found { tr!("file trovato", "file found") } else { tr!("FILE MANCANTE", "FILE MISSING") };
+        let def = DialogDef::new(tr!("Percorso immagine raster", "Raster image path"))
+            .with_control(info(tr!(
+                format!("Percorso attuale ({state}):\n{current}"),
+                format!("Current path ({state}):\n{current}")
+            )))
             .with_control(info(
-                "Tutte le immagini che usano lo stesso file verranno ricollegate. \
-                 La larghezza nel disegno resta la stessa."
-                    .into(),
+                tr!(
+                    "Tutte le immagini che usano lo stesso file verranno ricollegate. \
+                     La larghezza nel disegno resta la stessa.",
+                    "Every image using the same file will be relinked. \
+                     The width in the drawing stays the same."
+                )
+                .into(),
             ))
             .with_control(DialogControl::FilePicker {
                 id: "file".into(),
-                label: "Nuovo file".into(),
+                label: tr!("Nuovo file", "New file").into(),
                 default_path: current,
-                filter_name: "Immagini raster".into(),
+                filter_name: tr!("Immagini raster", "Raster images").into(),
                 extensions: EXTENSIONS.iter().map(|e| e.to_string()).collect(),
                 save: false,
             })
-            .submit_label("Ricollega")
-            .cancel_label("Annulla")
+            .submit_label(tr!("Ricollega", "Relink"))
+            .cancel_label(tr!("Annulla", "Cancel"))
             .width(560.0);
         PathDialog { handles, def, done: false }
     }
@@ -840,7 +870,7 @@ impl PathDialog {
 
 impl InteractiveCommand for PathDialog {
     fn prompt(&self) -> String {
-        "RT_PATH: scegli il nuovo file nella finestra".into()
+        tr!("RT_PATH: scegli il nuovo file nella finestra", "RT_PATH: choose the new file in the dialog").into()
     }
     fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
         CommandStep::NeedPoint
@@ -875,27 +905,31 @@ pub struct FindDialog {
 
 impl FindDialog {
     pub fn new() -> Self {
-        let def = DialogDef::new("Cerca le immagini mancanti")
+        let def = DialogDef::new(tr!("Cerca le immagini mancanti", "Find missing images"))
             .with_control(info(
-                "Scegli un file qualsiasi nella cartella in cui si trovano ora le immagini. \
-                 Ogni immagine il cui file manca viene ricollegata al file con lo stesso nome."
-                    .into(),
+                tr!(
+                    "Scegli un file qualsiasi nella cartella in cui si trovano ora le immagini. \
+                     Ogni immagine il cui file manca viene ricollegata al file con lo stesso nome.",
+                    "Choose any file in the folder where the images are now. \
+                     Every image whose file is missing is relinked to the file with the same name."
+                )
+                .into(),
             ))
             .with_control(DialogControl::FilePicker {
                 id: "file".into(),
-                label: "Un file nella cartella".into(),
+                label: tr!("Un file nella cartella", "A file in the folder").into(),
                 default_path: String::new(),
-                filter_name: "Immagini raster".into(),
+                filter_name: tr!("Immagini raster", "Raster images").into(),
                 extensions: EXTENSIONS.iter().map(|e| e.to_string()).collect(),
                 save: false,
             })
             .with_control(DialogControl::Checkbox {
                 id: "sub".into(),
-                label: "Cerca anche nelle sottocartelle".into(),
+                label: tr!("Cerca anche nelle sottocartelle", "Search subfolders too").into(),
                 default: true,
             })
-            .submit_label("Cerca")
-            .cancel_label("Annulla")
+            .submit_label(tr!("Cerca", "Search"))
+            .cancel_label(tr!("Annulla", "Cancel"))
             .width(520.0);
         FindDialog { def, done: false }
     }
@@ -909,7 +943,7 @@ impl Default for FindDialog {
 
 impl InteractiveCommand for FindDialog {
     fn prompt(&self) -> String {
-        "RT_FIND: scegli la cartella nella finestra".into()
+        tr!("RT_FIND: scegli la cartella nella finestra", "RT_FIND: choose the folder in the dialog").into()
     }
     fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
         CommandStep::NeedPoint
@@ -938,11 +972,11 @@ impl InteractiveCommand for FindDialog {
 
 // ── RT_ATTACH: insert a new image ──────────────────────────────────────────
 
-const ATTACH_MODES: &[(&str, &str)] = &[
-    ("SCREEN", "Indica sullo schermo (punto e angolo opposto)"),
-    ("WIDTH", "Larghezza nel disegno"),
-    ("DPI", "Risoluzione di stampa (DPI)"),
-    ("PIXEL", "1 pixel = 1 unità di disegno"),
+const ATTACH_MODES: Options = &[
+    ("SCREEN", "Indica sullo schermo (punto e angolo opposto)", "Specify on screen (point and opposite corner)"),
+    ("WIDTH", "Larghezza nel disegno", "Width in the drawing"),
+    ("DPI", "Risoluzione di stampa (DPI)", "Print resolution (DPI)"),
+    ("PIXEL", "1 pixel = 1 unità di disegno", "1 pixel = 1 drawing unit"),
 ];
 
 pub struct AttachDialog {
@@ -953,31 +987,35 @@ pub struct AttachDialog {
 impl AttachDialog {
     /// `unit_index` preselects the drawing unit (index into `UNITS`).
     pub fn new(default_path: String, unit_index: usize) -> Self {
-        let def = DialogDef::new("Inserisci immagine raster")
+        let def = DialogDef::new(tr!("Inserisci immagine raster", "Insert raster image"))
             .with_control(DialogControl::FilePicker {
                 id: "file".into(),
-                label: "File immagine".into(),
+                label: tr!("File immagine", "Image file").into(),
                 default_path,
-                filter_name: "Immagini raster".into(),
+                filter_name: tr!("Immagini raster", "Raster images").into(),
                 extensions: EXTENSIONS.iter().map(|e| e.to_string()).collect(),
                 save: false,
             })
-            .with_control(choice("mode", "Dimensione", &ATTACH_MODES.iter().map(|m| m.1).collect::<Vec<_>>(), 0))
-            .with_control(number("width", "Larghezza (unità di disegno)", 100.0))
+            .with_control(choice("mode", tr!("Dimensione", "Size"), &labels(ATTACH_MODES), 0))
+            .with_control(number("width", tr!("Larghezza (unità di disegno)", "Width (drawing units)"), 100.0))
             .with_control(number("dpi", "DPI", 300.0))
             .with_control(choice(
                 "unit",
-                "Unità del disegno (per DPI)",
-                &UNITS.iter().map(|u| u.1).collect::<Vec<_>>(),
+                tr!("Unità del disegno (per DPI)", "Drawing units (for DPI)"),
+                &labels(UNITS),
                 unit_index.min(UNITS.len() - 1),
             ))
             .with_control(info(
-                "L'immagine viene inserita sul layer corrente, con l'angolo in basso a sinistra \
-                 nel punto indicato. Il file resta collegato (non viene copiato nel disegno)."
-                    .into(),
+                tr!(
+                    "L'immagine viene inserita sul layer corrente, con l'angolo in basso a sinistra \
+                     nel punto indicato. Il file resta collegato (non viene copiato nel disegno).",
+                    "The image is inserted on the current layer, with its bottom-left corner \
+                     at the given point. The file stays linked (it is not copied into the drawing)."
+                )
+                .into(),
             ))
-            .submit_label("Inserisci")
-            .cancel_label("Annulla")
+            .submit_label(tr!("Inserisci", "Insert"))
+            .cancel_label(tr!("Annulla", "Cancel"))
             .width(540.0);
         AttachDialog { def, done: false }
     }
@@ -985,7 +1023,7 @@ impl AttachDialog {
 
 impl InteractiveCommand for AttachDialog {
     fn prompt(&self) -> String {
-        "RT_ATTACH: scegli il file e la dimensione nella finestra".into()
+        tr!("RT_ATTACH: scegli il file e la dimensione nella finestra", "RT_ATTACH: choose the file and size in the dialog").into()
     }
     fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
         CommandStep::NeedPoint
@@ -1056,8 +1094,14 @@ impl InteractiveCommand for AttachTool {
     fn prompt(&self) -> String {
         let name = commands::file_name_only(&self.path);
         let p = match (self.ins, self.px) {
-            (None, _) => format!("RT_ATTACH {name}: punto di inserimento (angolo in basso a sinistra)"),
-            (Some(_), _) => format!("RT_ATTACH {name}: angolo opposto (Invio = 1 pixel per unità)"),
+            (None, _) => tr!(
+                format!("RT_ATTACH {name}: punto di inserimento (angolo in basso a sinistra)"),
+                format!("RT_ATTACH {name}: insertion point (bottom-left corner)")
+            ),
+            (Some(_), _) => tr!(
+                format!("RT_ATTACH {name}: angolo opposto (Invio = 1 pixel per unità)"),
+                format!("RT_ATTACH {name}: opposite corner (Enter = 1 pixel per unit)")
+            ),
         };
         with_msg(&self.msg, p)
     }
@@ -1074,7 +1118,7 @@ impl InteractiveCommand for AttachTool {
             Some(a) => match geom::fit_proportional(a, pt, self.w, self.h) {
                 Some((corner, px)) => self.finish(corner, px),
                 None => {
-                    self.msg = Some("l'angolo opposto coincide con il primo".into());
+                    self.msg = Some(tr!("l'angolo opposto coincide con il primo", "the opposite corner is the same as the first").into());
                     CommandStep::NeedPoint
                 }
             },

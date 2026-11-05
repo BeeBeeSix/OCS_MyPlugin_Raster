@@ -1,103 +1,112 @@
-# opencad-raster-plugin — Raster Tools per Open CAD Studio
+# opencad-raster-plugin — Raster Tools for Open CAD Studio
 
-> **Stato: versione iniziale (0.x), in fase di test.** Le funzioni principali sono
-> complete ma potrebbero cambiare nelle prossime versioni. Le novità di ogni
-> versione sono nel [registro delle modifiche](CHANGELOG.md). Segnalazioni e
-> suggerimenti sono benvenuti nelle [Issues](https://github.com/Macchecaspita/opencad-raster-plugin/issues).
+**English** · [Italiano](README.it.md)
 
-Plugin per [Open CAD Studio](https://github.com/HakanSeven12/OpenCADStudio) che
-aggiunge la scheda **Raster** per lavorare sulle immagini GIF, JPG, PNG, BMP,
-TIFF e WebP inserite nei disegni DWG/DXF:
+> **Hobby project, made just for fun.** It is not intended for professional use
+> and comes with no warranty (see the GPL-3.0 licence): keep a copy of your
+> drawings before using it on real work. Early version (0.x): features may
+> change. What's new is in the [changelog](CHANGELOG.md) (in Italian); ideas and
+> bug reports are welcome in the [Issues](https://github.com/Macchecaspita/opencad-raster-plugin/issues).
 
-- **ritagliare** un'immagine (tenere l'interno), fare un **foro** (nascondere
-  l'interno) o **separare un pezzo** in una nuova immagine da spostare, con un
-  **rettangolo**, un **poligono** disegnato a clic o una **polilinea chiusa**,
-  un cerchio o un'ellisse già nel disegno;
-- **ridimensionare** trascinando un angolo, oppure a larghezza / altezza /
-  fattore di scala / **DPI** esatti;
-- **cambiare il percorso su disco** del file dell'immagine e **ritrovare** in
-  una cartella le immagini il cui file è stato spostato;
-- **elencare** le immagini con percorso, pixel, dimensioni e stato del file.
+A plugin for [Open CAD Studio](https://github.com/HakanSeven12/OpenCADStudio)
+that adds a **Raster** ribbon tab for GIF, JPG, PNG, BMP, TIFF and WebP images
+in DWG/DXF drawings:
 
-Il riferimento completo dei comandi è in [PLUGIN.md](PLUGIN.md).
+- **insert** an image, sized on screen, by width, by DPI or 1 pixel = 1 unit;
+- **clip** an image (keep the inside), cut a **hole** (hide the inside) or
+  **split a piece** off into a new image you can move — with a **rectangle**,
+  a **polygon** drawn by clicks, or an existing **closed polyline**, circle or
+  ellipse;
+- **resize** by dragging a corner, or to an exact width / height / scale
+  factor / **DPI**;
+- **change the file path** on disk and **find** images whose file was moved;
+- **list** every image with its path, pixels, size and file status.
 
-## Uso rapido
+The interface is in **English**, or in **Italian** when Open CAD Studio runs in
+Italian. `RT_LANG IT|EN|AUTO` forces a language.
 
-| Voglio… | Faccio… |
+Full command reference: [PLUGIN.md](PLUGIN.md).
+
+## Quick guide
+
+| I want to… | I do… |
 |---|---|
-| tagliare via i bordi di una foto | **Ritaglia**, clic sull'immagine, due angoli del rettangolo da tenere |
-| nascondere una zona | **Foro**, clic sull'immagine, due angoli |
-| ritagliare lungo un contorno irregolare | **Ritaglia ▾ › Poligono**, clic sull'immagine, clic sui vertici, Invio |
-| ritagliare lungo una polilinea già disegnata | seleziona immagine e polilinea → **Ritaglia ▾ › Da polilinea** |
-| ritagliare un dettaglio e spostarlo | **Separa pezzo**, poi `SPOSTA` sul pezzo (resta selezionato) |
-| portare una scansione in scala 1:1 | seleziona l'immagine → **Dimensioni / DPI** → modo *DPI*, 300, millimetri |
-| ingrandire a occhio | **Trascina**: angolo fisso, poi angolo opposto |
-| la foto è stata spostata su un altro disco | **Cerca in cartella** e scegli un file nella nuova cartella |
-| sostituire la foto con un'altra | seleziona l'immagine → **Cambia percorso** → scegli il file |
+| insert a photo or a scan | **Insert image**, pick the file and the size, click the point |
+| trim a photo's edges | **Clip**, click the image, two corners of the area to keep |
+| hide an area | **Hole**, click the image, two corners |
+| clip along an irregular outline | **Clip ▾ › Polygon**, click the image, click the vertices, Enter |
+| clip along a polyline already drawn | select image and polyline → **Clip ▾ › From polyline** |
+| cut out a detail and move it | **Split piece**, then `MOVE` the piece (it stays selected) |
+| bring a scan to 1:1 scale | select the image → **Size / DPI** → *DPI* mode, 300, millimetres |
+| enlarge by eye | **Drag**: fixed corner, then opposite corner |
+| the photo was moved to another drive | **Find in folder** and pick a file in the new folder |
+| replace the photo with another | select the image → **Change path** → pick the file |
 
-## Compilare
+## Install
 
-Serve Rust (https://rustup.rs). Dalla cartella del progetto:
+In Open CAD Studio's **Plugin Manager** (command `PLUGINS`):
+**Add repository →** `Macchecaspita/opencad-raster-plugin`, pick the latest
+version and press *Install*. Published versions are in
+[Releases](https://github.com/Macchecaspita/opencad-raster-plugin/releases).
+
+Or by hand: copy the built library **and** `plugin.toml` into
+
+- Windows: `%APPDATA%\OpenCADStudio\plugins\opencad.rastertools\`
+- macOS: `~/Library/Application Support/OpenCADStudio/plugins/opencad.rastertools/`
+- Linux: `~/.config/OpenCADStudio/plugins/opencad.rastertools/`
+
+and restart Open CAD Studio.
+
+## Build
+
+Needs Rust (https://rustup.rs). From the project folder:
 
 ```
 cargo test --release
 cargo build --release
 ```
 
-Il risultato è `target/release/opencad_raster_plugin.dll` (Windows),
-`libopencad_raster_plugin.so` (Linux) o `libopencad_raster_plugin.dylib` (macOS).
+The result is `target/release/opencad_raster_plugin.dll` (Windows),
+`libopencad_raster_plugin.so` (Linux) or `libopencad_raster_plugin.dylib` (macOS).
 
-## Installare
+## Publishing a new version
 
-Copia la libreria compilata **e** `plugin.toml` nella cartella
-
-- Windows: `%APPDATA%\OpenCADStudio\plugins\opencad.rastertools\`
-- macOS: `~/Library/Application Support/OpenCADStudio/plugins/opencad.rastertools/`
-- Linux: `~/.config/OpenCADStudio/plugins/opencad.rastertools/`
-
-e riavvia Open CAD Studio: compare la scheda **Raster**.
-
-Oppure, senza compilare nulla, dal **Plugin Manager** di Open CAD Studio
-(comando `PLUGINS`): **Add repository →** `Macchecaspita/opencad-raster-plugin`,
-scegli l'ultima versione e premi *Install*. Le versioni pubblicate sono in
-[Releases](https://github.com/Macchecaspita/opencad-raster-plugin/releases).
-
-## Pubblicare una nuova versione
-
-1. Scrivi le novità in [CHANGELOG.md](CHANGELOG.md), sotto **[Non rilasciato]**.
-2. In PowerShell, nella cartella del progetto:
+1. Write what's new in [CHANGELOG.md](CHANGELOG.md), under **[Non rilasciato]**.
+2. In PowerShell, in the project folder:
 
    ```
-   powershell -ExecutionPolicy Bypass -File scripts\release.ps1 0.2.0
+   powershell -ExecutionPolicy Bypass -File scripts\release.ps1 0.5.0
    ```
 
-Lo script aggiorna la versione in `Cargo.toml`, `plugin.toml` e `CHANGELOG.md`,
-compila e prova il plugin, poi, dopo la tua conferma, crea il commit e il tag
-e li carica su GitHub. Il workflow `release.yml` compila per Windows, Linux e
-macOS e pubblica la release con le note prese dal CHANGELOG.
+The script sets the version in `Cargo.toml`, `plugin.toml` and `CHANGELOG.md`,
+builds and tests the plugin, then — after you confirm — commits, tags and
+pushes. The `release.yml` workflow builds for Windows, Linux and macOS and
+publishes the release with notes taken from the changelog.
 
-Numerazione: `0.1.1` per le sole correzioni, `0.2.0` per nuove funzioni,
-`1.0.0` quando il plugin sarà considerato stabile.
+Numbering: `0.4.1` for fixes only, `0.5.0` for new features, `1.0.0` once the
+plugin is considered stable.
 
-## Compatibilità
+## Compatibility
 
-Compilato contro `ocs_plugin_api` del tag **v2026.44** (Plugin API 14), come il
-plugin di esempio Land Survey. Per una versione successiva del CAD, aggiorna
-`rev` in `Cargo.toml` con il commit del nuovo tag e `api_version` in
-`plugin.toml`.
+Built against `ocs_plugin_api` from tag **v2026.44** (Plugin API 14). The DWG
+library `acadrust` is fetched from its author's repository through a
+`[patch]` in `Cargo.toml` (it left the address that release refers to). For a
+later CAD release, set `rev` in `Cargo.toml` to that release tag's commit and
+`api_version` in `plugin.toml`.
 
-## Struttura
+## Layout
 
 ```
-src/lib.rs       manifest, punto d'ingresso del plugin
-src/ribbon.rs    scheda Raster della barra multifunzione
-src/commands.rs  comandi RT_* e modifiche al disegno
-src/tools.rs     strumenti interattivi (selezione, rettangolo, trascinamento) e finestre
-src/geom.rs      geometria pura: pixel ↔ disegno, ritaglio, scala (con test)
-src/imgsize.rs   dimensioni in pixel dall'intestazione del file (con test)
-scripts/release.ps1  pubblicazione di una nuova versione
-CHANGELOG.md     registro delle modifiche
-icons/           icone SVG della scheda
+src/lib.rs          manifest, plugin entry point
+src/i18n.rs         English / Italian choice
+src/ribbon.rs       Raster ribbon tab
+src/commands.rs     RT_* commands and drawing edits
+src/tools.rs        interactive tools (pick, rectangle, polygon, drag) and dialogs
+src/geom.rs         pure geometry: pixel ↔ drawing, clipping, scaling (tested)
+src/imgsize.rs      pixel size from the file header (tested)
+scripts/release.ps1 publish a new version
+CHANGELOG.md        changelog
+icons/              ribbon SVG icons
 ```
 
-Licenza GPL-3.0-only, come Open CAD Studio.
+Licence: GPL-3.0-only, like Open CAD Studio.

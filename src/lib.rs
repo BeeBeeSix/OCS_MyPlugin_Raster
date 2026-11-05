@@ -18,6 +18,8 @@ use ocs_plugin_api::host::{BuiltinPlugin, HostApi};
 use ocs_plugin_api::manifest::{ApiVersion, PluginManifest};
 use ocs_plugin_api::ribbon::CadModule;
 
+#[macro_use]
+pub mod i18n;
 pub mod commands;
 pub mod geom;
 pub mod imgsize;
@@ -32,9 +34,9 @@ static MANIFEST: PluginManifest = PluginManifest {
     id: PLUGIN_ID,
     name: "Raster Tools",
     version: env!("CARGO_PKG_VERSION"),
-    description: "Gestione immagini raster (GIF, JPG, PNG, BMP, TIFF, WebP): ritaglio rettangolare, \
-                  foro e separazione di un pezzo, ridimensionamento grafico o numerico (anche a DPI), \
-                  cambio del percorso su disco e ricerca dei file spostati.",
+    description: "Raster images (GIF, JPG, PNG, BMP, TIFF, WebP): insert, clip with a rectangle, polygon \
+                  or polyline, cut holes and split pieces, resize on screen or by size/DPI, change the \
+                  file path and find moved files. English and Italian.",
     api_version: ApiVersion::CURRENT,
     ribbon_order: 60,
     xdata_apps: &[],

@@ -12,6 +12,18 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.4.0] - 2026-11-05
+
+### Aggiunto
+- **Inglese e italiano.** Il plugin parla inglese, oppure italiano quando Open CAD
+  Studio è in italiano (con l'impostazione "Sistema", quando Windows è in italiano).
+  Messaggi, richieste, finestre ed etichette della barra seguono la lingua; il nuovo
+  comando `RT_LANG IT|EN|AUTO` la forza a mano.
+  *English and Italian: the plugin follows Open CAD Studio's language (English by
+  default); `RT_LANG IT|EN|AUTO` forces one.*
+- README e riferimento dei comandi in inglese (`README.md`, `PLUGIN.md`) e in
+  italiano (`README.it.md`, `PLUGIN.it.md`), con l'avvertenza "progetto amatoriale".
+
 ## [0.3.1] - 2026-11-05
 
 ### Corretto

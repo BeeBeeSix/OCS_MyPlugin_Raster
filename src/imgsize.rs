@@ -35,19 +35,19 @@ pub fn dims_from_reader<R: Read + Seek>(r: &mut R) -> io::Result<(u32, u32)> {
     let head = &head[..n];
     if head.starts_with(b"\x89PNG\r\n\x1a\n") {
         if n < 24 {
-            return Err(bad("PNG troncato"));
+            return Err(bad("truncated PNG"));
         }
         return Ok((be32(&head[16..20]), be32(&head[20..24])));
     }
     if head.starts_with(b"GIF87a") || head.starts_with(b"GIF89a") {
         if n < 10 {
-            return Err(bad("GIF troncato"));
+            return Err(bad("truncated GIF"));
         }
         return Ok((le16(&head[6..8]) as u32, le16(&head[8..10]) as u32));
     }
     if head.starts_with(b"BM") {
         if n < 26 {
-            return Err(bad("BMP troncato"));
+            return Err(bad("truncated BMP"));
         }
         let header_size = le32(&head[14..18]);
         if header_size == 12 {
@@ -67,7 +67,7 @@ pub fn dims_from_reader<R: Read + Seek>(r: &mut R) -> io::Result<(u32, u32)> {
     if n >= 30 && head.starts_with(b"RIFF") && &head[8..12] == b"WEBP" {
         return webp_dims(head);
     }
-    Err(bad("formato immagine non riconosciuto"))
+    Err(bad("unrecognised image format"))
 }
 
 fn read_up_to<R: Read>(r: &mut R, buf: &mut [u8]) -> io::Result<usize> {
@@ -112,14 +112,14 @@ fn jpeg_dims<R: Read + Seek>(r: &mut R) -> io::Result<(u32, u32)> {
         match marker {
             // Standalone markers: no length.
             0x01 | 0xD0..=0xD7 => continue,
-            0xD9 | 0xDA => return Err(bad("JPEG senza intestazione di frame")),
+            0xD9 | 0xDA => return Err(bad("JPEG without a frame header")),
             _ => {}
         }
         let mut len = [0u8; 2];
         r.read_exact(&mut len)?;
         let len = be16(&len) as i64;
         if len < 2 {
-            return Err(bad("JPEG: segmento non valido"));
+            return Err(bad("JPEG: invalid segment"));
         }
         let is_sof = matches!(marker, 0xC0..=0xCF) && !matches!(marker, 0xC4 | 0xC8 | 0xCC);
         if is_sof {
@@ -163,7 +163,7 @@ fn tiff_dims<R: Read + Seek>(r: &mut R, little: bool) -> io::Result<(u32, u32)> 
             return Ok((w, h));
         }
     }
-    Err(bad("TIFF senza dimensioni"))
+    Err(bad("TIFF without dimensions"))
 }
 
 fn webp_dims(head: &[u8]) -> io::Result<(u32, u32)> {
@@ -173,26 +173,26 @@ fn webp_dims(head: &[u8]) -> io::Result<(u32, u32)> {
         b"VP8 " => {
             // 3-byte frame tag, 3-byte start code, then 14-bit w/h.
             if d.len() < 10 || d[3..6] != [0x9d, 0x01, 0x2a] {
-                return Err(bad("WebP VP8 non valido"));
+                return Err(bad("invalid WebP VP8"));
             }
             Ok(((le16(&d[6..8]) & 0x3fff) as u32, (le16(&d[8..10]) & 0x3fff) as u32))
         }
         b"VP8L" => {
             if d.len() < 5 || d[0] != 0x2f {
-                return Err(bad("WebP VP8L non valido"));
+                return Err(bad("invalid WebP VP8L"));
             }
             let bits = le32(&d[1..5]);
             Ok(((bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1))
         }
         b"VP8X" => {
             if d.len() < 10 {
-                return Err(bad("WebP VP8X troncato"));
+                return Err(bad("truncated WebP VP8X"));
             }
             let w = 1 + (d[4] as u32 | (d[5] as u32) << 8 | (d[6] as u32) << 16);
             let h = 1 + (d[7] as u32 | (d[8] as u32) << 8 | (d[9] as u32) << 16);
             Ok((w, h))
         }
-        _ => Err(bad("WebP: blocco sconosciuto")),
+        _ => Err(bad("WebP: unknown chunk")),
     }
 }
 

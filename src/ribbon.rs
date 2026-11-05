@@ -25,7 +25,7 @@ fn file_tool(id: &'static str, label: &'static str, svg: &'static [u8], title: &
         event: ModuleEvent::PluginFileDialog {
             command: id.to_string(),
             title: title.to_string(),
-            filter_name: "Immagini raster".to_string(),
+            filter_name: tr!("Immagini raster", "Raster images").to_string(),
             extensions: EXTENSIONS.iter().map(|e| e.to_string()).collect(),
         },
     })
@@ -45,9 +45,9 @@ fn clip_menu(id: &'static str, label: &'static str, icon: &'static [u8], cmds: [
         label,
         icon: IconKind::Svg(icon),
         items: vec![
-            (cmds[0], "Rettangolo", IconKind::Svg(icon)),
-            (cmds[1], "Poligono", IconKind::Svg(POLY)),
-            (cmds[2], "Da polilinea", IconKind::Svg(PLINE)),
+            (cmds[0], tr!("Rettangolo", "Rectangle"), IconKind::Svg(icon)),
+            (cmds[1], tr!("Poligono", "Polygon"), IconKind::Svg(POLY)),
+            (cmds[2], tr!("Da polilinea", "From polyline"), IconKind::Svg(PLINE)),
         ],
         default: cmds[0],
     }
@@ -67,23 +67,23 @@ impl CadModule for RasterModule {
         GROUPS.get_or_init(|| {
             vec![
                 RibbonGroup {
-                    title: "Inserisci",
-                    tools: vec![cmd("RT_ATTACH", "Inserisci immagine", include_bytes!("../icons/attach.svg"))],
+                    title: tr!("Inserisci", "Insert"),
+                    tools: vec![cmd("RT_ATTACH", tr!("Inserisci immagine", "Insert image"), include_bytes!("../icons/attach.svg"))],
                 },
                 RibbonGroup {
-                    title: "Ritaglio",
+                    title: tr!("Ritaglio", "Clip"),
                     tools: vec![
-                        clip_menu("RT_CLIP_MENU", "Ritaglia", CLIP, ["RT_CLIP", "RT_CLIPPOLY", "RT_CLIPPL"]),
-                        clip_menu("RT_HOLE_MENU", "Foro", HOLE, ["RT_CLIPHOLE", "RT_HOLEPOLY", "RT_HOLEPL"]),
-                        clip_menu("RT_CUT_MENU", "Separa pezzo", CUT, ["RT_CUT", "RT_CUTPOLY", "RT_CUTPL"]),
-                        cmd("RT_UNCLIP", "Togli ritaglio", include_bytes!("../icons/unclip.svg")),
+                        clip_menu("RT_CLIP_MENU", tr!("Ritaglia", "Clip"), CLIP, ["RT_CLIP", "RT_CLIPPOLY", "RT_CLIPPL"]),
+                        clip_menu("RT_HOLE_MENU", tr!("Foro", "Hole"), HOLE, ["RT_CLIPHOLE", "RT_HOLEPOLY", "RT_HOLEPL"]),
+                        clip_menu("RT_CUT_MENU", tr!("Separa pezzo", "Split piece"), CUT, ["RT_CUT", "RT_CUTPOLY", "RT_CUTPL"]),
+                        cmd("RT_UNCLIP", tr!("Togli ritaglio", "Remove clip"), include_bytes!("../icons/unclip.svg")),
                     ],
                 },
                 RibbonGroup {
-                    title: "Dimensioni",
+                    title: tr!("Dimensioni", "Size"),
                     tools: vec![
-                        cmd("RT_RESIZE", "Trascina", include_bytes!("../icons/resize.svg")),
-                        cmd("RT_SIZE", "Dimensioni / DPI", include_bytes!("../icons/size.svg")),
+                        cmd("RT_RESIZE", tr!("Trascina", "Drag"), include_bytes!("../icons/resize.svg")),
+                        cmd("RT_SIZE", tr!("Dimensioni / DPI", "Size / DPI"), include_bytes!("../icons/size.svg")),
                     ],
                 },
                 RibbonGroup {
@@ -91,17 +91,17 @@ impl CadModule for RasterModule {
                     tools: vec![
                         file_tool(
                             "RT_PATH",
-                            "Cambia percorso",
+                            tr!("Cambia percorso", "Change path"),
                             include_bytes!("../icons/path.svg"),
-                            "Nuovo file per le immagini selezionate",
+                            tr!("Nuovo file per le immagini selezionate", "New file for the selected images"),
                         ),
                         file_tool(
                             "RT_FIND",
-                            "Cerca in cartella",
+                            tr!("Cerca in cartella", "Find in folder"),
                             include_bytes!("../icons/find.svg"),
-                            "Scegli un file qualsiasi nella cartella dove cercare le immagini mancanti",
+                            tr!("Scegli un file qualsiasi nella cartella dove cercare le immagini mancanti", "Choose any file in the folder to search for missing images"),
                         ),
-                        cmd("RT_LIST", "Elenco", include_bytes!("../icons/list.svg")),
+                        cmd("RT_LIST", tr!("Elenco", "List"), include_bytes!("../icons/list.svg")),
                     ],
                 },
             ]

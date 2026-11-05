@@ -182,15 +182,15 @@ fn set_shape(img: &mut RasterImage, shape: &Shape, mode: ClipMode) {
 
 fn clip_label(img: &RasterImage) -> String {
     if !clip_active(img) {
-        return "nessuno".into();
+        return tr!("nessuno", "none").into();
     }
     let kind = match img.clip_boundary.clip_type {
-        ClipType::Rectangular => "rettangolo",
-        ClipType::Polygonal => "poligono",
+        ClipType::Rectangular => tr!("rettangolo", "rectangle"),
+        ClipType::Polygonal => tr!("poligono", "polygon"),
     };
     match img.clip_boundary.clip_mode {
         ClipMode::Outside => kind.to_string(),
-        ClipMode::Inside => format!("foro ({kind})"),
+        ClipMode::Inside => tr!(format!("foro ({kind})"), format!("hole ({kind})")),
     }
 }
 
@@ -307,12 +307,15 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
     if !verb.starts_with("RT_") {
         return false;
     }
+    // Follow a language change made in the CAD since the last command.
+    crate::i18n::refresh();
     // Everything after the verb, case and spaces intact (paths).
     let rest = trimmed[verb.len()..].trim();
     let args: Vec<&str> = rest.split_whitespace().collect();
 
     match verb.as_str() {
         "RT_HELP" | "RT_" | "RT_HELLO" => help(host),
+        "RT_LANG" => lang(host, rest),
 
         "RT_ATTACH" => {
             let unit = drawing_unit_index(host);
@@ -355,7 +358,7 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
         "RT_UNCLIP" => {
             let sel = selected_images(host);
             if sel.is_empty() {
-                start_pick(host, "RT_UNCLIPAPPLY", "togliere il ritaglio");
+                start_pick(host, "RT_UNCLIPAPPLY", tr!("togliere il ritaglio", "remove the clip from"));
             } else {
                 unclip(host, &sel);
             }
@@ -369,7 +372,7 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
         "RT_RESIZE" => {
             let images = tools::snapshots(host);
             if images.is_empty() {
-                host.push_error("RT_RESIZE: nel disegno non ci sono immagini raster.");
+                host.push_error(tr!("RT_RESIZE: nel disegno non ci sono immagini raster.", "RT_RESIZE: the drawing has no raster images."));
             } else {
                 let pre = single_selected(host);
                 host.start_interactive(Box::new(tools::ResizeTool::new(images, pre)));
@@ -404,7 +407,7 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
             let sel = selected_images(host);
             if rest.is_empty() {
                 if sel.is_empty() {
-                    start_pick(host, "RT_PATHDLG", "cambiare il percorso");
+                    start_pick(host, "RT_PATHDLG", tr!("cambiare il percorso", "change the path of"));
                 } else {
                     start_path_dialog(host, sel);
                 }
@@ -412,7 +415,7 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
                 // Chosen from the ribbon with nothing selected: keep the path
                 // and ask which image it is for.
                 set_pending_path(rest.to_string());
-                start_pick(host, "RT_PATHAPPLY", "collegare al nuovo file");
+                start_pick(host, "RT_PATHAPPLY", tr!("collegare al nuovo file", "link to the new file"));
             } else {
                 relink(host, &sel, rest);
             }
@@ -426,7 +429,7 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
             if let Some(t) = args.first() {
                 match take_pending_path() {
                     Some(p) => relink(host, &parse_handles(t), &p),
-                    None => host.push_error("RT_PATH: nessun file scelto."),
+                    None => host.push_error(tr!("RT_PATH: nessun file scelto.", "RT_PATH: no file chosen.")),
                 }
             }
         }
@@ -442,20 +445,20 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
             if let Some(mode) = args.first() {
                 match take_pending_path() {
                     Some(p) => find_in_folder(host, Path::new(&p), !mode.eq_ignore_ascii_case("TOP")),
-                    None => host.push_error("RT_FIND: nessuna cartella scelta."),
+                    None => host.push_error(tr!("RT_FIND: nessuna cartella scelta.", "RT_FIND: no folder chosen.")),
                 }
             }
         }
 
         _ => {
-            host.push_error(&format!("{verb}: comando sconosciuto. Digita RT_HELP per l'elenco."));
+            host.push_error(&tr!(format!("{verb}: comando sconosciuto. Digita RT_HELP per l'elenco."), format!("{verb}: unknown command. Type RT_HELP for the list.")));
         }
     }
     true
 }
 
 fn help(host: &mut dyn HostApi) {
-    host.push_info(
+    host.push_info(tr!(
         "Raster Tools — immagini GIF/JPG/PNG/BMP/TIFF/WebP.\n\
          RT_ATTACH: inserisce un'immagine nel disegno (a schermo, per larghezza, a DPI o 1 pixel = 1 unità).\n\
          RT_CLIP: ritaglia con un rettangolo (tiene l'interno; ripetuto, restringe).\n\
@@ -468,8 +471,66 @@ fn help(host: &mut dyn HostApi) {
          RT_SIZE: larghezza, altezza, fattore di scala o risoluzione DPI.\n\
          RT_PATH: cambia il file su disco dell'immagine.\n\
          RT_FIND: cerca in una cartella le immagini il cui file manca.\n\
-         RT_LIST: elenco immagini con percorso, pixel, dimensioni e stato.",
-    );
+         RT_LIST: elenco immagini con percorso, pixel, dimensioni e stato.\n\
+         RT_LANG IT|EN|AUTO: lingua del plugin (AUTO segue Open CAD Studio).",
+        "Raster Tools — GIF/JPG/PNG/BMP/TIFF/WebP images.\n\
+         RT_ATTACH: insert an image into the drawing (on screen, by width, by DPI or 1 pixel = 1 unit).\n\
+         RT_CLIP: clip with a rectangle (keeps the inside; repeated, it narrows).\n\
+         RT_CLIPHOLE: hide the part inside the rectangle.\n\
+         RT_CUT: split the part inside the rectangle off into a new, movable image.\n\
+         RT_CLIPPOLY / RT_HOLEPOLY / RT_CUTPOLY: as above, with a polygon drawn by clicks (Enter closes it).\n\
+         RT_CLIPPL / RT_HOLEPL / RT_CUTPL: as above, with an existing closed polyline, circle or ellipse.\n\
+         RT_UNCLIP: remove the clip.\n\
+         RT_RESIZE: resize by dragging a corner (proportional).\n\
+         RT_SIZE: width, height, scale factor or DPI resolution.\n\
+         RT_PATH: change the image's file on disk.\n\
+         RT_FIND: search a folder for images whose file is missing.\n\
+         RT_LIST: list images with path, pixels, size and status.\n\
+         RT_LANG IT|EN|AUTO: plugin language (AUTO follows Open CAD Studio)."
+    ));
+}
+
+fn lang(host: &mut dyn HostApi, arg: &str) {
+    use crate::i18n::{self, Choice, Lang};
+    if arg.is_empty() {
+        let (c, l) = i18n::status();
+        let mode = match c {
+            Choice::Auto => tr!("AUTO (segue Open CAD Studio)", "AUTO (follows Open CAD Studio)"),
+            Choice::It => "IT",
+            Choice::En => "EN",
+        };
+        let now = if l == Lang::It { "italiano" } else { "English" };
+        host.push_info(&tr!(
+            format!("RT_LANG: impostazione {mode}, lingua attuale: {now}. Uso: RT_LANG IT | EN | AUTO"),
+            format!("RT_LANG: setting {mode}, current language: {now}. Usage: RT_LANG IT | EN | AUTO")
+        ));
+        return;
+    }
+    let Some(choice) = i18n::parse_choice(arg) else {
+        host.push_error(tr!("Uso: RT_LANG IT | EN | AUTO", "Usage: RT_LANG IT | EN | AUTO"));
+        return;
+    };
+    match i18n::set_choice(choice) {
+        Ok(()) => {
+            let auto = choice == Choice::Auto;
+            host.push_info(tr!(
+                if auto {
+                    "RT_LANG: AUTO, segue la lingua di Open CAD Studio (ora italiano). Le etichette della barra cambiano al prossimo avvio."
+                } else {
+                    "RT_LANG: lingua impostata su italiano. Le etichette della barra cambiano al prossimo avvio di Open CAD Studio."
+                },
+                if auto {
+                    "RT_LANG: AUTO, follows Open CAD Studio's language (now English). Ribbon labels change at the next start."
+                } else {
+                    "RT_LANG: language set to English. Ribbon labels change the next time Open CAD Studio starts."
+                }
+            ));
+        }
+        Err(e) => host.push_error(&tr!(
+            format!("RT_LANG: impossibile salvare l'impostazione: {e}"),
+            format!("RT_LANG: cannot save the setting: {e}")
+        )),
+    }
 }
 
 fn single_selected(host: &dyn HostApi) -> Option<Handle> {
@@ -480,7 +541,7 @@ fn single_selected(host: &dyn HostApi) -> Option<Handle> {
 fn start_poly(host: &mut dyn HostApi, kind: tools::ClipKind) {
     let images = tools::snapshots(host);
     if images.is_empty() {
-        host.push_error("Nel disegno non ci sono immagini raster.");
+        host.push_error(tr!("Nel disegno non ci sono immagini raster.", "The drawing has no raster images."));
         return;
     }
     let pre = single_selected(host);
@@ -490,14 +551,17 @@ fn start_poly(host: &mut dyn HostApi, kind: tools::ClipKind) {
 fn start_pline(host: &mut dyn HostApi, kind: tools::ClipKind) {
     let images = tools::snapshots(host);
     if images.is_empty() {
-        host.push_error("Nel disegno non ci sono immagini raster.");
+        host.push_error(tr!("Nel disegno non ci sono immagini raster.", "The drawing has no raster images."));
         return;
     }
     let shapes = closed_shapes(host);
     if shapes.is_empty() {
-        host.push_error(&format!(
-            "{}: nel disegno non ci sono polilinee chiuse, cerchi o ellissi da usare come contorno.",
-            kind.pline_name()
+        host.push_error(&tr!(
+            format!(
+                "{}: nel disegno non ci sono polilinee chiuse, cerchi o ellissi da usare come contorno.",
+                kind.pline_name()
+            ),
+            format!("{}: the drawing has no closed polylines, circles or ellipses to use as an outline.", kind.pline_name())
         ));
         return;
     }
@@ -517,7 +581,7 @@ fn start_pline(host: &mut dyn HostApi, kind: tools::ClipKind) {
 fn start_pick(host: &mut dyn HostApi, verb: &'static str, what: &'static str) {
     let images = tools::snapshots(host);
     if images.is_empty() {
-        host.push_error("Nel disegno non ci sono immagini raster.");
+        host.push_error(tr!("Nel disegno non ci sono immagini raster.", "The drawing has no raster images."));
         return;
     }
     host.start_interactive(Box::new(tools::PickTool::new(images, verb, what)));
@@ -526,7 +590,7 @@ fn start_pick(host: &mut dyn HostApi, verb: &'static str, what: &'static str) {
 fn start_clip(host: &mut dyn HostApi, kind: tools::ClipKind) {
     let images = tools::snapshots(host);
     if images.is_empty() {
-        host.push_error("Nel disegno non ci sono immagini raster.");
+        host.push_error(tr!("Nel disegno non ci sono immagini raster.", "The drawing has no raster images."));
         return;
     }
     let pre = single_selected(host);
@@ -536,7 +600,7 @@ fn start_clip(host: &mut dyn HostApi, kind: tools::ClipKind) {
 fn start_size_dialog(host: &mut dyn HostApi, handles: Vec<Handle>) {
     let first = handles.iter().find_map(|h| fetch(host, *h));
     let Some(first) = first else {
-        host.push_error("RT_SIZE: nessuna immagine raster valida.");
+        host.push_error(tr!("RT_SIZE: nessuna immagine raster valida.", "RT_SIZE: no valid raster image."));
         return;
     };
     host.start_interactive(Box::new(tools::SizeDialog::new(handles, &first)));
@@ -544,7 +608,7 @@ fn start_size_dialog(host: &mut dyn HostApi, handles: Vec<Handle>) {
 
 fn start_path_dialog(host: &mut dyn HostApi, handles: Vec<Handle>) {
     let Some(first) = handles.iter().find_map(|h| fetch(host, *h)) else {
-        host.push_error("RT_PATH: nessuna immagine raster valida.");
+        host.push_error(tr!("RT_PATH: nessuna immagine raster valida.", "RT_PATH: no valid raster image."));
         return;
     };
     let found = resolve(&first.file_path, dwg_dir(host).as_deref()).is_some();
@@ -572,20 +636,23 @@ fn drawing_unit_index(host: &dyn HostApi) -> usize {
 /// the dialog: check the chosen file and start placing it.
 fn attach_place(host: &mut dyn HostApi, args: &[&str]) {
     let Some(path) = take_pending_path() else {
-        host.push_error("RT_ATTACH: nessun file scelto.");
+        host.push_error(tr!("RT_ATTACH: nessun file scelto.", "RT_ATTACH: no file chosen."));
         return;
     };
     let p = Path::new(&path);
     if !p.is_file() {
-        host.push_error(&format!("RT_ATTACH: il file \"{path}\" non esiste."));
+        host.push_error(&tr!(format!("RT_ATTACH: il file \"{path}\" non esiste."), format!("RT_ATTACH: the file \"{path}\" does not exist.")));
         return;
     }
     let (w, h) = match imgsize::read_dims(p) {
         Ok(d) if d.0 > 0 && d.1 > 0 => d,
         _ => {
-            host.push_error(&format!(
-                "RT_ATTACH: \"{}\" non è un'immagine GIF, JPG, PNG, BMP, TIFF o WebP leggibile.",
-                file_name_only(&path)
+            host.push_error(&tr!(
+                format!(
+                    "RT_ATTACH: \"{}\" non è un'immagine GIF, JPG, PNG, BMP, TIFF o WebP leggibile.",
+                    file_name_only(&path)
+                ),
+                format!("RT_ATTACH: \"{}\" is not a readable GIF, JPG, PNG, BMP, TIFF or WebP image.", file_name_only(&path))
             ));
             return;
         }
@@ -600,30 +667,27 @@ fn attach_place(host: &mut dyn HostApi, args: &[&str]) {
         "WIDTH" => match width {
             Some(v) if v > 0.0 => Some(v / w as f64),
             _ => {
-                host.push_error("RT_ATTACH: indica una larghezza maggiore di zero.");
+                host.push_error(tr!("RT_ATTACH: indica una larghezza maggiore di zero.", "RT_ATTACH: enter a width greater than zero."));
                 return;
             }
         },
         "DPI" => match (dpi, geom::units_per_inch(unit)) {
             (Some(d), Some(upi)) if d > 0.0 => Some(upi / d),
             _ => {
-                host.push_error("RT_ATTACH: indica un valore DPI maggiore di zero.");
+                host.push_error(tr!("RT_ATTACH: indica un valore DPI maggiore di zero.", "RT_ATTACH: enter a DPI value greater than zero."));
                 return;
             }
         },
         _ => {
-            host.push_error("Uso: RT_ATTACHPLACE SCREEN|WIDTH|DPI|PIXEL <larghezza> <dpi> MM|CM|M|IN");
+            host.push_error(tr!("Uso: RT_ATTACHPLACE SCREEN|WIDTH|DPI|PIXEL <larghezza> <dpi> MM|CM|M|IN", "Usage: RT_ATTACHPLACE SCREEN|WIDTH|DPI|PIXEL <width> <dpi> MM|CM|M|IN"));
             return;
         }
     };
     if let Some(px) = px {
-        host.push_info(&format!(
-            "RT_ATTACH: {} — {}×{} px, {} × {} unità.",
-            file_name_only(&path),
-            w,
-            h,
-            fmt_len(w as f64 * px),
-            fmt_len(h as f64 * px)
+        let (name, ww, hh) = (file_name_only(&path), fmt_len(w as f64 * px), fmt_len(h as f64 * px));
+        host.push_info(&tr!(
+            format!("RT_ATTACH: {name} — {w}×{h} px, {ww} × {hh} unità."),
+            format!("RT_ATTACH: {name} — {w}×{h} px, {ww} × {hh} units.")
         ));
     }
     host.start_interactive(Box::new(tools::AttachTool::new(path, w, h, px)));
@@ -634,18 +698,18 @@ fn attach_place(host: &mut dyn HostApi, args: &[&str]) {
 fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
     let vals: Option<Vec<f64>> = (0..4).map(|i| num(args.get(i).copied())).collect();
     let (Some(v), Some(path)) = (vals, take_pending_path()) else {
-        host.push_error("Uso: RT_ATTACHAPPLY <x> <y> <z> <dimensione_pixel> (dopo la scelta del file)");
+        host.push_error(tr!("Uso: RT_ATTACHAPPLY <x> <y> <z> <dimensione_pixel> (dopo la scelta del file)", "Usage: RT_ATTACHAPPLY <x> <y> <z> <pixel_size> (after choosing the file)"));
         return;
     };
     let px = v[3];
     if !valid_factor(px) {
-        host.push_error("RT_ATTACH: dimensione non valida.");
+        host.push_error(tr!("RT_ATTACH: dimensione non valida.", "RT_ATTACH: invalid size."));
         return;
     }
     let (w, h) = match imgsize::read_dims(Path::new(&path)) {
         Ok(d) => d,
         Err(e) => {
-            host.push_error(&format!("RT_ATTACH: impossibile leggere \"{path}\": {e}"));
+            host.push_error(&tr!(format!("RT_ATTACH: impossibile leggere \"{path}\": {e}"), format!("RT_ATTACH: cannot read \"{path}\": {e}")));
             return;
         }
     };
@@ -661,21 +725,19 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
     let handle = host.add_entity(EntityType::RasterImage(img));
     host.end_undo_group();
     if handle.is_null() {
-        host.push_error(&format!(
-            "RT_ATTACH: il CAD non è riuscito a inserire \"{}\" (file non leggibile o layer bloccato).",
-            file_name_only(&path)
+        let name = file_name_only(&path);
+        host.push_error(&tr!(
+            format!("RT_ATTACH: il CAD non è riuscito a inserire \"{name}\" (file non leggibile o layer bloccato)."),
+            format!("RT_ATTACH: the CAD could not insert \"{name}\" (unreadable file or locked layer).")
         ));
         return;
     }
     host.set_dirty();
     let _ = host.set_selection(&[handle]);
-    host.push_info(&format!(
-        "RT_ATTACH: inserita {} ({}×{} px, {} × {} unità).",
-        file_name_only(&path),
-        w,
-        h,
-        fmt_len(w as f64 * px),
-        fmt_len(h as f64 * px)
+    let (name, ww, hh) = (file_name_only(&path), fmt_len(w as f64 * px), fmt_len(h as f64 * px));
+    host.push_info(&tr!(
+        format!("RT_ATTACH: inserita {name} ({w}×{h} px, {ww} × {hh} unità)."),
+        format!("RT_ATTACH: inserted {name} ({w}×{h} px, {ww} × {hh} units).")
     ));
 }
 
@@ -684,7 +746,7 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
 fn list(host: &mut dyn HostApi) {
     let images = all_images(host);
     if images.is_empty() {
-        host.push_info("RT_LIST: nel disegno non ci sono immagini raster.");
+        host.push_info(tr!("RT_LIST: nel disegno non ci sono immagini raster.", "RT_LIST: the drawing has no raster images."));
         return;
     }
     let dir = dwg_dir(host);
@@ -694,14 +756,14 @@ fn list(host: &mut dyn HostApi) {
         let f = frame(img);
         let (w, h) = f.world_size();
         let state = match resolve(&img.file_path, dir.as_deref()) {
-            Some(_) => "trovato",
+            Some(_) => tr!("trovato", "found"),
             None => {
                 missing += 1;
-                "MANCANTE"
+                tr!("MANCANTE", "MISSING")
             }
         };
         lines.push(format!(
-            "  {}  {}  {}×{} px  {} × {}  pixel {}  ritaglio: {}  [{}]",
+            "  {}  {}  {}×{} px  {} × {}  pixel {}  {}: {}  [{}]",
             hex(img.common.handle),
             file_name_only(&img.file_path),
             img.size.x as u64,
@@ -709,16 +771,16 @@ fn list(host: &mut dyn HostApi) {
             fmt_len(w),
             fmt_len(h),
             fmt_len(geom::len3(f.u)),
+            tr!("ritaglio", "clip"),
             clip_label(img),
             state,
         ));
         lines.push(format!("      {}", img.file_path));
     }
-    host.push_output(&format!(
-        "RT_LIST: {} immagini, {} con file mancante.\n{}",
-        images.len(),
-        missing,
-        lines.join("\n")
+    let (n, body) = (images.len(), lines.join("\n"));
+    host.push_output(&tr!(
+        format!("RT_LIST: {n} immagini, {missing} con file mancante.\n{body}"),
+        format!("RT_LIST: {n} image(s), {missing} with a missing file.\n{body}")
     ));
 }
 
@@ -727,7 +789,7 @@ fn list(host: &mut dyn HostApi) {
 /// `RT_CLIPAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2> [z]` — a window
 /// drawn on screen (axis-aligned in the drawing).
 fn clip_apply(host: &mut dyn HostApi, args: &[&str]) {
-    let usage = "Uso: RT_CLIPAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2>";
+    let usage = tr!("Uso: RT_CLIPAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2>", "Usage: RT_CLIPAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2>");
     let (Some(h), Some(mode)) = (args.first().and_then(|t| parse_handle(t)), args.get(1)) else {
         host.push_error(usage);
         return;
@@ -747,7 +809,7 @@ fn clip_apply(host: &mut dyn HostApi, args: &[&str]) {
 /// `RT_CLIPPOLYAPPLY <handle> KEEP|HOLE|CUT [x1 y1 x2 y2 x3 y3 ...]` — a
 /// polygon given as coordinates, or the one a tool just drew or picked.
 fn clip_poly_apply(host: &mut dyn HostApi, args: &[&str]) {
-    let usage = "Uso: RT_CLIPPOLYAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2> <x3> <y3> ...";
+    let usage = tr!("Uso: RT_CLIPPOLYAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2> <x3> <y3> ...", "Usage: RT_CLIPPOLYAPPLY <handle> KEEP|HOLE|CUT <x1> <y1> <x2> <y2> <x3> <y3> ...");
     let (Some(h), Some(mode)) = (args.first().and_then(|t| parse_handle(t)), args.get(1)) else {
         host.push_error(usage);
         return;
@@ -758,7 +820,7 @@ fn clip_poly_apply(host: &mut dyn HostApi, args: &[&str]) {
         Some(c) if c.is_empty() => match take_pending_poly() {
             Some(p) => p,
             None => {
-                host.push_error("Nessun poligono indicato.");
+                host.push_error(tr!("Nessun poligono indicato.", "No polygon given."));
                 return;
             }
         },
@@ -776,34 +838,34 @@ fn clip_poly_apply(host: &mut dyn HostApi, args: &[&str]) {
 fn clip_region(host: &mut dyn HostApi, h: Handle, mode: &str, world: &[P3], polygon: bool) {
     let mode = mode.to_ascii_uppercase();
     let (name, what) = match (mode.as_str(), polygon) {
-        ("KEEP", false) => ("RT_CLIP", "il rettangolo"),
-        ("HOLE", false) => ("RT_CLIPHOLE", "il rettangolo"),
-        ("CUT", false) => ("RT_CUT", "il rettangolo"),
-        ("KEEP", true) => ("RT_CLIPPOLY", "il poligono"),
-        ("HOLE", true) => ("RT_HOLEPOLY", "il poligono"),
-        ("CUT", true) => ("RT_CUTPOLY", "il poligono"),
+        ("KEEP", false) => ("RT_CLIP", tr!("il rettangolo", "the rectangle")),
+        ("HOLE", false) => ("RT_CLIPHOLE", tr!("il rettangolo", "the rectangle")),
+        ("CUT", false) => ("RT_CUT", tr!("il rettangolo", "the rectangle")),
+        ("KEEP", true) => ("RT_CLIPPOLY", tr!("il poligono", "the polygon")),
+        ("HOLE", true) => ("RT_HOLEPOLY", tr!("il poligono", "the polygon")),
+        ("CUT", true) => ("RT_CUTPOLY", tr!("il poligono", "the polygon")),
         _ => {
-            host.push_error("Modo di ritaglio sconosciuto: usa KEEP, HOLE o CUT.");
+            host.push_error(tr!("Modo di ritaglio sconosciuto: usa KEEP, HOLE o CUT.", "Unknown clip mode: use KEEP, HOLE or CUT."));
             return;
         }
     };
     let Some(mut img) = fetch(host, h) else {
-        host.push_error(&format!("{name}: l'entità non è un'immagine raster."));
+        host.push_error(&tr!(format!("{name}: l'entità non è un'immagine raster."), format!("{name}: the entity is not a raster image.")));
         return;
     };
     let f = frame(&img);
     let px: Option<Vec<P2>> = world.iter().map(|&p| f.to_pixel(p)).collect();
     let Some(px) = px else {
-        host.push_error(&format!("{name}: l'immagine ha una cornice degenere."));
+        host.push_error(&tr!(format!("{name}: l'immagine ha una cornice degenere."), format!("{name}: the image has a degenerate frame.")));
         return;
     };
     let px = geom::dedup(&px, 1e-9);
     if px.len() >= 4 && !geom::is_simple(&px) {
-        host.push_error(&format!("{name}: {what} si interseca con se stesso; disegnalo senza lati incrociati."));
+        host.push_error(&tr!(format!("{name}: {what} si interseca con se stesso; disegnalo senza lati incrociati."), format!("{name}: {what} intersects itself; draw it without crossing sides.")));
         return;
     }
     if px.len() < 3 || geom::signed_area(&px).abs() < geom::MIN_AREA_PX {
-        host.push_error(&format!("{name}: {what} ha area nulla."));
+        host.push_error(&tr!(format!("{name}: {what} ha area nulla."), format!("{name}: {what} has zero area.")));
         return;
     }
     let full = f.full_px();
@@ -830,36 +892,36 @@ fn clip_region(host: &mut dyn HostApi, h: Handle, mode: &str, world: &[P3], poly
                 }
             };
             let Some(shape) = geom::shape_from_px(f.h, &region) else {
-                host.push_error(&format!("{name}: {what} non tocca la parte visibile dell'immagine."));
+                host.push_error(&tr!(format!("{name}: {what} non tocca la parte visibile dell'immagine."), format!("{name}: {what} does not touch the visible part of the image.")));
                 return;
             };
             if clip_active(&img) && img.clip_boundary.clip_mode == ClipMode::Inside {
-                host.push_info(&format!("{name}: il foro esistente è stato sostituito dal nuovo ritaglio."));
+                host.push_info(&tr!(format!("{name}: il foro esistente è stato sostituito dal nuovo ritaglio."), format!("{name}: the existing hole was replaced by the new clip.")));
             }
             set_shape(&mut img, &shape, ClipMode::Outside);
             host.begin_undo_group(name);
             let ok = host.update_entity(EntityType::RasterImage(img));
             host.end_undo_group();
-            let msg = if nested { "ritaglio ristretto." } else { "immagine ritagliata." };
+            let msg = if nested { tr!("ritaglio ristretto.", "clip narrowed.") } else { tr!("immagine ritagliata.", "image clipped.") };
             report(host, ok, &format!("{name}: {msg}"));
         }
         "HOLE" => {
             let Some(shape) = geom::shape_from_px(f.h, &on_image) else {
-                host.push_error(&format!("{name}: {what} non tocca l'immagine."));
+                host.push_error(&tr!(format!("{name}: {what} non tocca l'immagine."), format!("{name}: {what} does not touch the image.")));
                 return;
             };
             if covers_frame(&f, &on_image) {
-                host.push_error(&format!("{name}: {what} copre tutta l'immagine; per toglierla usa CANCELLA."));
+                host.push_error(&tr!(format!("{name}: {what} copre tutta l'immagine; per toglierla usa CANCELLA."), format!("{name}: {what} covers the whole image; use ERASE to remove it.")));
                 return;
             }
             if clip_active(&img) {
-                host.push_info(&format!("{name}: il ritaglio precedente è stato sostituito dal foro."));
+                host.push_info(&tr!(format!("{name}: il ritaglio precedente è stato sostituito dal foro."), format!("{name}: the previous clip was replaced by the hole.")));
             }
             set_shape(&mut img, &shape, ClipMode::Inside);
             host.begin_undo_group(name);
             let ok = host.update_entity(EntityType::RasterImage(img));
             host.end_undo_group();
-            report(host, ok, &format!("{name}: parte interna nascosta."));
+            report(host, ok, &tr!(format!("{name}: parte interna nascosta."), format!("{name}: inside part hidden.")));
         }
         _ => {
             // CUT
@@ -871,11 +933,11 @@ fn clip_region(host: &mut dyn HostApi, h: Handle, mode: &str, world: &[P3], poly
                 return;
             }
             let Some(shape) = geom::shape_from_px(f.h, &on_image) else {
-                host.push_error(&format!("{name}: {what} non tocca l'immagine."));
+                host.push_error(&tr!(format!("{name}: {what} non tocca l'immagine."), format!("{name}: {what} does not touch the image.")));
                 return;
             };
             if covers_frame(&f, &on_image) {
-                host.push_error(&format!("{name}: {what} copre tutta l'immagine: non c'è niente da separare."));
+                host.push_error(&tr!(format!("{name}: {what} copre tutta l'immagine: non c'è niente da separare."), format!("{name}: {what} covers the whole image: there is nothing to split off.")));
                 return;
             }
             // The piece: a fresh entity on the same file, clipped to the outline.
@@ -893,18 +955,19 @@ fn clip_region(host: &mut dyn HostApi, h: Handle, mode: &str, world: &[P3], poly
             let new_handle = if ok { host.add_entity(EntityType::RasterImage(piece)) } else { Handle::NULL };
             host.end_undo_group();
             if !ok {
-                host.push_error(&format!("{name}: l'immagine non può essere modificata (layer bloccato?)."));
+                host.push_error(&tr!(format!("{name}: l'immagine non può essere modificata (layer bloccato?)."), format!("{name}: the image cannot be changed (locked layer?).")));
                 return;
             }
             if new_handle.is_null() {
-                host.push_error(&format!("{name}: il pezzo non è stato creato."));
+                host.push_error(&tr!(format!("{name}: il pezzo non è stato creato."), format!("{name}: the piece was not created.")));
                 return;
             }
             host.set_dirty();
             let _ = host.set_selection(&[new_handle]);
-            host.push_info(&format!(
-                "{name}: pezzo separato ({}). È selezionato: usa SPOSTA (MOVE) per spostarlo.",
-                hex(new_handle)
+            let h = hex(new_handle);
+            host.push_info(&tr!(
+                format!("{name}: pezzo separato ({h}). È selezionato: usa SPOSTA (MOVE) per spostarlo."),
+                format!("{name}: piece split off ({h}). It is selected: use MOVE to move it.")
             ));
         }
     }
@@ -919,7 +982,7 @@ fn report(host: &mut dyn HostApi, ok: bool, msg: &str) {
         host.set_dirty();
         host.push_info(msg);
     } else {
-        host.push_error("L'immagine non può essere modificata (layer bloccato o entità non trovata).");
+        host.push_error(tr!("L'immagine non può essere modificata (layer bloccato o entità non trovata).", "The image cannot be changed (locked layer or entity not found)."));
     }
 }
 
@@ -934,7 +997,7 @@ fn unclip(host: &mut dyn HostApi, handles: &[Handle]) {
         }
     }
     if edits.is_empty() {
-        host.push_info("RT_UNCLIP: nessuna immagine ritagliata tra quelle scelte.");
+        host.push_info(tr!("RT_UNCLIP: nessuna immagine ritagliata tra quelle scelte.", "RT_UNCLIP: none of the chosen images is clipped."));
         return;
     }
     host.begin_undo_group("RT_UNCLIP");
@@ -948,7 +1011,7 @@ fn unclip(host: &mut dyn HostApi, handles: &[Handle]) {
     if done > 0 {
         host.set_dirty();
     }
-    host.push_info(&format!("RT_UNCLIP: ritaglio tolto da {done} immagine/i."));
+    host.push_info(&tr!(format!("RT_UNCLIP: ritaglio tolto da {done} immagine/i."), format!("RT_UNCLIP: clip removed from {done} image(s).")));
 }
 
 // ── Resize ──────────────────────────────────────────────────────────────────
@@ -966,7 +1029,7 @@ fn valid_factor(k: f64) -> bool {
 
 /// `RT_SCALEAPPLY <handle> <anchor_a> <anchor_b> <sx> [sy]` — anchor in pixels.
 fn scale_apply(host: &mut dyn HostApi, args: &[&str]) {
-    let usage = "Uso: RT_SCALEAPPLY <handle> <ancora_px_x> <ancora_px_y> <fattore_x> [fattore_y]";
+    let usage = tr!("Uso: RT_SCALEAPPLY <handle> <ancora_px_x> <ancora_px_y> <fattore_x> [fattore_y]", "Usage: RT_SCALEAPPLY <handle> <anchor_px_x> <anchor_px_y> <factor_x> [factor_y]");
     let h = args.first().and_then(|t| parse_handle(t));
     let (a, b, sx) = (num(args.get(1).copied()), num(args.get(2).copied()), num(args.get(3).copied()));
     let (Some(h), Some(a), Some(b), Some(sx)) = (h, a, b, sx) else {
@@ -975,11 +1038,11 @@ fn scale_apply(host: &mut dyn HostApi, args: &[&str]) {
     };
     let sy = num(args.get(4).copied()).unwrap_or(sx);
     if !valid_factor(sx) || !valid_factor(sy) {
-        host.push_error("RT_RESIZE: il fattore di scala deve essere positivo.");
+        host.push_error(tr!("RT_RESIZE: il fattore di scala deve essere positivo.", "RT_RESIZE: the scale factor must be positive."));
         return;
     }
     let Some(mut img) = fetch(host, h) else {
-        host.push_error("RT_RESIZE: l'entità non è un'immagine raster.");
+        host.push_error(tr!("RT_RESIZE: l'entità non è un'immagine raster.", "RT_RESIZE: the entity is not a raster image."));
         return;
     };
     apply_scale(&mut img, [a, b], sx, sy);
@@ -987,12 +1050,12 @@ fn scale_apply(host: &mut dyn HostApi, args: &[&str]) {
     host.begin_undo_group("RT_RESIZE");
     let ok = host.update_entity(EntityType::RasterImage(img));
     host.end_undo_group();
-    report(host, ok, &format!("RT_RESIZE: scala {}, nuove dimensioni {} × {}.", fmt_len(sx), fmt_len(w), fmt_len(hh)));
+    report(host, ok, &tr!(format!("RT_RESIZE: scala {}, nuove dimensioni {} × {}.", fmt_len(sx), fmt_len(w), fmt_len(hh)), format!("RT_RESIZE: scale {}, new size {} × {}.", fmt_len(sx), fmt_len(w), fmt_len(hh))));
 }
 
 /// `RT_SIZEAPPLY <handles> W|H|WH|F|DPI <w> <h> <factor> <dpi> MM|CM|M|IN BL|CTR FULL|VIS`
 pub fn size_apply(host: &mut dyn HostApi, args: &[&str]) {
-    let usage = "Uso: RT_SIZEAPPLY <handle,...> W|H|WH|F|DPI <larghezza> <altezza> <fattore> <dpi> MM|CM|M|IN BL|CTR FULL|VIS";
+    let usage = tr!("Uso: RT_SIZEAPPLY <handle,...> W|H|WH|F|DPI <larghezza> <altezza> <fattore> <dpi> MM|CM|M|IN BL|CTR FULL|VIS", "Usage: RT_SIZEAPPLY <handle,...> W|H|WH|F|DPI <width> <height> <factor> <dpi> MM|CM|M|IN BL|CTR FULL|VIS");
     if args.len() < 9 {
         host.push_error(usage);
         return;
@@ -1042,7 +1105,7 @@ pub fn size_apply(host: &mut dyn HostApi, args: &[&str]) {
             }
         };
         if !valid_factor(sx) || !valid_factor(sy) {
-            host.push_error("RT_SIZE: valori non validi (servono numeri positivi).");
+            host.push_error(tr!("RT_SIZE: valori non validi (servono numeri positivi).", "RT_SIZE: invalid values (positive numbers needed)."));
             return;
         }
         let anchor = if centre { [(lo[0] + hi[0]) * 0.5, (lo[1] + hi[1]) * 0.5] } else { lo };
@@ -1050,7 +1113,7 @@ pub fn size_apply(host: &mut dyn HostApi, args: &[&str]) {
         edits.push(img);
     }
     if edits.is_empty() {
-        host.push_error("RT_SIZE: nessuna immagine raster valida.");
+        host.push_error(tr!("RT_SIZE: nessuna immagine raster valida.", "RT_SIZE: no valid raster image."));
         return;
     }
     host.begin_undo_group("RT_SIZE");
@@ -1065,13 +1128,13 @@ pub fn size_apply(host: &mut dyn HostApi, args: &[&str]) {
     host.end_undo_group();
     if done > 0 {
         host.set_dirty();
-        host.push_info(&format!(
-            "RT_SIZE: {done} immagine/i ridimensionata/e (ultima: {} × {} cornice intera).",
-            fmt_len(last.0),
-            fmt_len(last.1)
+        let (lw, lh) = (fmt_len(last.0), fmt_len(last.1));
+        host.push_info(&tr!(
+            format!("RT_SIZE: {done} immagine/i ridimensionata/e (ultima: {lw} × {lh} cornice intera)."),
+            format!("RT_SIZE: {done} image(s) resized (last: {lw} × {lh} full frame).")
         ));
     } else {
-        host.push_error("RT_SIZE: nessuna immagine modificata (layer bloccato?).");
+        host.push_error(tr!("RT_SIZE: nessuna immagine modificata (layer bloccato?).", "RT_SIZE: no image changed (locked layer?)."));
     }
 }
 
@@ -1129,30 +1192,30 @@ fn groups_for(host: &dyn HostApi, targets: Option<&[Handle]>) -> Vec<Group> {
 fn relink(host: &mut dyn HostApi, targets: &[Handle], new_path: &str) {
     let new_path = new_path.trim().trim_matches('"').to_string();
     if targets.is_empty() {
-        host.push_error("RT_PATH: nessuna immagine raster scelta.");
+        host.push_error(tr!("RT_PATH: nessuna immagine raster scelta.", "RT_PATH: no raster image chosen."));
         return;
     }
     if !Path::new(&new_path).is_file() {
-        host.push_error(&format!("RT_PATH: il file \"{new_path}\" non esiste."));
+        host.push_error(&tr!(format!("RT_PATH: il file \"{new_path}\" non esiste."), format!("RT_PATH: the file \"{new_path}\" does not exist.")));
         return;
     }
     if !imgsize::is_raster_name(&new_path) {
-        host.push_info("RT_PATH: attenzione, l'estensione non è di un formato raster riconosciuto.");
+        host.push_info(tr!("RT_PATH: attenzione, l'estensione non è di un formato raster riconosciuto.", "RT_PATH: warning, the extension is not a recognised raster format."));
     }
     let groups = groups_for(host, Some(targets));
     if groups.is_empty() {
-        host.push_error("RT_PATH: nessuna immagine raster tra quelle scelte.");
+        host.push_error(tr!("RT_PATH: nessuna immagine raster tra quelle scelte.", "RT_PATH: none of the chosen entities is a raster image."));
         return;
     }
     let dims = imgsize::read_dims(Path::new(&new_path)).ok();
     if dims.is_none() {
-        host.push_info("RT_PATH: impossibile leggere le dimensioni in pixel del nuovo file; mantengo quelle attuali.");
+        host.push_info(tr!("RT_PATH: impossibile leggere le dimensioni in pixel del nuovo file; mantengo quelle attuali.", "RT_PATH: cannot read the new file's pixel size; keeping the current one."));
     }
     let mut total = 0;
     for g in groups {
         total += relink_group(host, g, &new_path, dims);
     }
-    host.push_info(&format!("RT_PATH: {total} immagine/i collegata/e a \"{new_path}\"."));
+    host.push_info(&tr!(format!("RT_PATH: {total} immagine/i collegata/e a \"{new_path}\"."), format!("RT_PATH: {total} image(s) linked to \"{new_path}\".")));
 }
 
 /// Point every image of `g` at `new_path`, keeping each one's world width
@@ -1192,14 +1255,20 @@ fn relink_group(host: &mut dyn HostApi, g: Group, new_path: &str, dims: Option<(
         Some(def) => {
             let pattern = file_name_only(&def).replace(' ', "?");
             if pattern.is_empty() || !host.execute_command(&format!("XREF Path {pattern} {new_path}")) {
-                host.push_info(&format!(
-                    "RT_PATH: immagine aggiornata a video. Per salvare il nuovo percorso nel file \
-                     esegui:  XREF Path {pattern} {new_path}"
+                host.push_info(&tr!(
+                    format!(
+                        "RT_PATH: immagine aggiornata a video. Per salvare il nuovo percorso nel file \
+                         esegui:  XREF Path {pattern} {new_path}"
+                    ),
+                    format!(
+                        "RT_PATH: image updated on screen. To save the new path in the file \
+                         run:  XREF Path {pattern} {new_path}"
+                    )
                 ));
             }
         }
         None => host.push_info(
-            "RT_PATH: l'immagine non ha una definizione nel disegno; il percorso è aggiornato sull'entità.",
+            tr!("RT_PATH: l'immagine non ha una definizione nel disegno; il percorso è aggiornato sull'entità.", "RT_PATH: the image has no definition in the drawing; the path is updated on the entity."),
         ),
     }
     done
@@ -1241,7 +1310,7 @@ fn index_folder(root: &Path, recurse: bool) -> HashMap<String, PathBuf> {
 fn find_in_folder(host: &mut dyn HostApi, picked: &Path, recurse: bool) {
     let root = if picked.is_dir() { picked.to_path_buf() } else { picked.parent().map(Path::to_path_buf).unwrap_or_default() };
     if !root.is_dir() {
-        host.push_error(&format!("RT_FIND: la cartella \"{}\" non esiste.", root.display()));
+        host.push_error(&tr!(format!("RT_FIND: la cartella \"{}\" non esiste.", root.display()), format!("RT_FIND: the folder \"{}\" does not exist.", root.display())));
         return;
     }
     let dir = dwg_dir(host);
@@ -1250,7 +1319,7 @@ fn find_in_folder(host: &mut dyn HostApi, picked: &Path, recurse: bool) {
         .filter(|g| resolve(&g.path, dir.as_deref()).is_none())
         .collect();
     if missing.is_empty() {
-        host.push_info("RT_FIND: tutte le immagini del disegno hanno il file al suo posto.");
+        host.push_info(tr!("RT_FIND: tutte le immagini del disegno hanno il file al suo posto.", "RT_FIND: every image in the drawing has its file in place."));
         return;
     }
     let index = index_folder(&root, recurse);
@@ -1266,9 +1335,9 @@ fn find_in_folder(host: &mut dyn HostApi, picked: &Path, recurse: bool) {
             None => not_found.push(file_name_only(&g.path).to_string()),
         }
     }
-    let mut msg = format!("RT_FIND: in \"{}\" ricollegate {fixed} immagine/i.", root.display());
+    let mut msg = tr!(format!("RT_FIND: in \"{}\" ricollegate {fixed} immagine/i.", root.display()), format!("RT_FIND: relinked {fixed} image(s) in \"{}\".", root.display()));
     if !not_found.is_empty() {
-        msg.push_str(&format!(" Non trovati: {}.", not_found.join(", ")));
+        msg.push_str(&tr!(format!(" Non trovati: {}.", not_found.join(", ")), format!(" Not found: {}.", not_found.join(", "))));
     }
     host.push_info(&msg);
 }
