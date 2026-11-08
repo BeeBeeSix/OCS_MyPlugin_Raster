@@ -121,7 +121,7 @@ pub fn is_italian_tag(tag: &str) -> bool {
 }
 
 /// Open CAD Studio's per-user config folder (same rules as the host).
-fn config_dir() -> Option<PathBuf> {
+pub(crate) fn config_dir() -> Option<PathBuf> {
     // Unset and empty variables are treated alike.
     let var = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty());
     let base: PathBuf = if cfg!(target_os = "windows") {

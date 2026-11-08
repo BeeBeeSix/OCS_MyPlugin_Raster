@@ -21,6 +21,7 @@ use ocs_plugin_api::ribbon::CadModule;
 #[macro_use]
 pub mod i18n;
 pub mod commands;
+pub mod diag;
 pub mod geom;
 pub mod imgsize;
 pub mod pixels;
@@ -56,7 +57,12 @@ impl BuiltinPlugin for RasterToolsPlugin {
     }
 
     fn dispatch(&self, host: &mut dyn HostApi, cmd: &str) -> bool {
-        commands::handle(host, cmd)
+        diag::install_panic_hook();
+        let handled = commands::handle(host, cmd);
+        if handled {
+            diag::log(&format!("dispatch {cmd:?}"));
+        }
+        handled
     }
 }
 

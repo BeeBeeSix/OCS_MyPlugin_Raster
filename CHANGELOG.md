@@ -12,6 +12,14 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.6.2] - 2026-11-08
+
+### Aggiunto
+- Registro diagnostico `rastertools-log.txt` nella cartella delle impostazioni di
+  Open CAD Studio: i comandi ricevuti dal plugin e i passaggi di `RT_TRANSP`, per
+  capire dove si ferma un comando quando la riga di comando non mostra nulla.
+  *Diagnostic log `rastertools-log.txt` in Open CAD Studio's settings folder.*
+
 ## [0.6.1] - 2026-11-08
 
 ### Corretto

@@ -314,6 +314,7 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
     let mut rest = trimmed[verb.len()..].trim();
     let kept = if rest.is_empty() { tools::take_deferred(&verb) } else { None };
     if let Some(k) = kept.as_deref() {
+        crate::diag::log(&format!("{verb}: kept arguments {k:?}"));
         rest = k;
     }
     let args: Vec<&str> = rest.split_whitespace().collect();
@@ -869,6 +870,7 @@ fn transp_source(host: &mut dyn HostApi, h: Handle) -> Option<(RasterImage, Path
         Some(p) => Some((img, p)),
         None => {
             let path = img.file_path.clone();
+            crate::diag::log(&format!("  file not found: {path:?}"));
             host.push_error(&tr!(
                 format!("RT_TRANSP: file non trovato: \"{path}\". Ricollegalo prima con RT_PATH o RT_FIND."),
                 format!("RT_TRANSP: file not found: \"{path}\". Relink it first with RT_PATH or RT_FIND.")
@@ -882,6 +884,7 @@ fn decode_or_report(host: &mut dyn HostApi, path: &Path, keep: bool) -> Option<(
     match decode_rgba(path, keep) {
         Ok(d) => Some(d),
         Err(e) => {
+            crate::diag::log(&format!("  decode error: {e}"));
             let name = file_name_only(&path.to_string_lossy()).to_string();
             host.push_error(&tr!(
                 format!("RT_TRANSP: impossibile leggere \"{name}\": {e}"),
@@ -901,8 +904,10 @@ fn transp_pick(host: &mut dyn HostApi, args: &[&str]) {
         host.push_error(tr!("Uso: RT_TRANSPPICK <handle> <x_px> <y_px>", "Usage: RT_TRANSPPICK <handle> <x_px> <y_px>"));
         return;
     };
+    crate::diag::log(&format!("RT_TRANSPPICK {args:?}"));
     let Some((img, path)) = transp_source(host, h) else { return };
     let Some((w, hh, mut px)) = decode_or_report(host, &path, true) else { return };
+    crate::diag::log(&format!("  decoded {w}x{hh} from {}", path.display()));
     let Some((x, y)) = crate::pixels::file_pixel(a, b, img.size.x, img.size.y, w, hh) else {
         host.push_error(tr!("RT_TRANSP: il punto è fuori dall'immagine.", "RT_TRANSP: the point is outside the image."));
         return;
@@ -920,6 +925,7 @@ fn transp_pick(host: &mut dyn HostApi, args: &[&str]) {
         path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
         Some("jpg" | "jpeg" | "jpe" | "webp")
     );
+    crate::diag::log(&format!("  pixel ({x},{y}) = {c:?}; opening the dialog"));
     host.start_interactive(Box::new(tools::TranspDialog::new(h, x, y, [c[0], c[1], c[2]], lossy)));
 }
 
@@ -937,6 +943,7 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
         return;
     };
     let area = args.get(4).is_some_and(|m| m.eq_ignore_ascii_case("AREA"));
+    crate::diag::log(&format!("RT_TRANSPAPPLY {args:?}"));
     let Some((_img, path)) = transp_source(host, h) else { return };
     let big = |w: u32, h: u32| w as u64 * h as u64 >= 8_000_000;
     let Some((w, hh, mut px)) = decode_or_report(host, &path, false) else { return };
@@ -950,6 +957,7 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
     let key = [c[0], c[1], c[2]];
     let changed =
         crate::pixels::make_transparent(&mut pic, key, crate::pixels::tol_from_percent(tol), area.then_some((x, y)));
+    crate::diag::log(&format!("  {w}x{hh}: {changed} pixels close to {key:?}"));
     if changed == 0 {
         host.push_info(tr!(
             "RT_TRANSP: nessun pixel di quel colore da rendere trasparente.",
@@ -965,8 +973,10 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
             format!("RT_TRANSP: saving the PNG copy ({w}×{hh} px, {mpx:.0} megapixels), please wait…")
         ));
     }
+    crate::diag::log(&format!("  saving {}", out.display()));
     let saved = save_png(host, &out, w, hh, &px);
     drop(px);
+    crate::diag::log(&format!("  saved: {saved:?}"));
     if let Err(e) = saved {
         let dir = out.parent().map(|d| d.display().to_string()).unwrap_or_default();
         host.push_error(&tr!(
@@ -985,6 +995,7 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
     for g in groups {
         done += relink_group(host, g, &out_s, Some((w, hh)), "RT_TRANSP", true);
     }
+    crate::diag::log(&format!("  relinked {done} image(s)"));
     let pct = changed as f64 * 100.0 / (w as f64 * hh as f64);
     let (hex, name) = (crate::pixels::hex_color(key), file_name_only(&out_s).to_string());
     host.push_info(&tr!(

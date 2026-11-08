@@ -1230,6 +1230,7 @@ impl InteractiveCommand for TranspTool {
             self.msg = Some(tr!("clicca dentro la parte visibile dell'immagine", "click inside the visible part of the image").into());
             return CommandStep::NeedPoint;
         }
+        crate::diag::log(&format!("TranspTool: click on {:X} at pixel ({}, {})", snap.handle.value(), p[0], p[1]));
         deferred("RT_TRANSPPICK", format!("{:X} {} {}", snap.handle.value(), p[0], p[1]))
     }
 
@@ -1327,9 +1328,11 @@ impl InteractiveCommand for TranspDialog {
         tr!("RT_TRANSP: imposta la tolleranza nella finestra", "RT_TRANSP: set the tolerance in the dialog").into()
     }
     fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+        crate::diag::log("TranspDialog: point ignored");
         CommandStep::NeedPoint
     }
     fn on_enter(&mut self) -> CommandStep {
+        crate::diag::log("TranspDialog: Enter → cancel");
         CommandStep::Cancel
     }
     fn modal_dialog(&self) -> Option<DialogDef> {
@@ -1337,6 +1340,7 @@ impl InteractiveCommand for TranspDialog {
     }
     fn on_dialog_response(&mut self, response: DialogResponse) -> CommandStep {
         self.done = true;
+        crate::diag::log(&format!("TranspDialog: response {response:?}"));
         let DialogResponse::Submitted(m) = response else {
             return CommandStep::Cancel;
         };
