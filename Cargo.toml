@@ -1,6 +1,6 @@
 [package]
 name = "opencad-raster-plugin"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 description = "Raster Tools add-on for Open CAD Studio — rectangular clip / hole / split, resize (drag, size, DPI), relink and find moved GIF/JPG/PNG/BMP/TIFF/WebP images."
 license = "GPL-3.0-only"
@@ -24,6 +24,9 @@ crate-type = ["cdylib", "rlib"]
 ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", rev = "0e77cae652271d08c7619238e619f9b6668ae17c", features = ["host"] }
 # Reads Open CAD Studio's settings.json to follow its interface language.
 serde_json = "1"
+# Decode the image files (same decoders as Open CAD Studio) and write the
+# transparent PNG copy for RT_TRANSP.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp"] }
 
 [profile.release]
 lto = "thin"

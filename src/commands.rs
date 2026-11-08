@@ -384,6 +384,39 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
             }
         }
 
+        "RT_TRANSP" => {
+            let images = tools::snapshots(host);
+            if images.is_empty() {
+                host.push_error(tr!("Nel disegno non ci sono immagini raster.", "The drawing has no raster images."));
+            } else {
+                let pre = single_selected(host);
+                host.start_interactive(Box::new(tools::TranspTool::new(images, pre)));
+            }
+        }
+        "RT_TRANSPPICK" => {
+            if !args.is_empty() {
+                transp_pick(host, &args);
+            }
+        }
+        "RT_TRANSPAPPLY" => {
+            if !args.is_empty() {
+                transp_apply(host, &args);
+            }
+        }
+        "RT_TRANSPOFF" => {
+            let sel = selected_images(host);
+            if sel.is_empty() {
+                start_pick(host, "RT_TRANSPOFFAPPLY", tr!("togliere la trasparenza", "remove transparency from"));
+            } else {
+                transp_off(host, &sel);
+            }
+        }
+        "RT_TRANSPOFFAPPLY" => {
+            if let Some(t) = args.first() {
+                transp_off(host, &parse_handles(t));
+            }
+        }
+
         "RT_SIZE" => {
             let sel = selected_images(host);
             if sel.is_empty() {
@@ -467,6 +500,8 @@ fn help(host: &mut dyn HostApi) {
          RT_CLIPPOLY / RT_HOLEPOLY / RT_CUTPOLY: come sopra, con un poligono disegnato a clic (Invio chiude).\n\
          RT_CLIPPL / RT_HOLEPL / RT_CUTPL: come sopra, con una polilinea chiusa, un cerchio o un'ellisse esistenti.\n\
          RT_UNCLIP: toglie il ritaglio.\n\
+         RT_TRANSP: rende trasparente un colore cliccato sull'immagine (crea una copia PNG).\n\
+         RT_TRANSPOFF: toglie la trasparenza.\n\
          RT_RESIZE: ridimensiona trascinando un angolo (proporzionale).\n\
          RT_SIZE: larghezza, altezza, fattore di scala o risoluzione DPI.\n\
          RT_PATH: cambia il file su disco dell'immagine.\n\
@@ -481,6 +516,8 @@ fn help(host: &mut dyn HostApi) {
          RT_CLIPPOLY / RT_HOLEPOLY / RT_CUTPOLY: as above, with a polygon drawn by clicks (Enter closes it).\n\
          RT_CLIPPL / RT_HOLEPL / RT_CUTPL: as above, with an existing closed polyline, circle or ellipse.\n\
          RT_UNCLIP: remove the clip.\n\
+         RT_TRANSP: make a colour clicked on the image transparent (creates a PNG copy).\n\
+         RT_TRANSPOFF: turn transparency off.\n\
          RT_RESIZE: resize by dragging a corner (proportional).\n\
          RT_SIZE: width, height, scale factor or DPI resolution.\n\
          RT_PATH: change the image's file on disk.\n\
@@ -738,6 +775,196 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
     host.push_info(&tr!(
         format!("RT_ATTACH: inserita {name} ({w}×{h} px, {ww} × {hh} unità)."),
         format!("RT_ATTACH: inserted {name} ({w}×{h} px, {ww} × {hh} units).")
+    ));
+}
+
+// ── RT_TRANSP ───────────────────────────────────────────────────────────────
+
+/// The last picture decoded, so picking a colour and applying it decode the
+/// file once: (path, modified time, width, height, RGBA8 pixels).
+type Decoded = (PathBuf, Option<std::time::SystemTime>, u32, u32, Vec<u8>);
+static DECODED: Mutex<Option<Decoded>> = Mutex::new(None);
+
+/// RGBA8 pixels of the file behind an image entity.
+fn decode_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+    let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    {
+        let cache = DECODED.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((p, t, w, h, px)) = cache.as_ref() {
+            if p == path && *t == mtime {
+                return Ok((*w, *h, px.clone()));
+            }
+        }
+    }
+    let rgba = image::open(path).map_err(|e| e.to_string())?.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let px = rgba.into_raw();
+    *DECODED.lock().unwrap_or_else(|e| e.into_inner()) = Some((path.to_path_buf(), mtime, w, h, px.clone()));
+    Ok((w, h, px))
+}
+
+/// The image entity and the file it shows, or an error already reported.
+fn transp_source(host: &mut dyn HostApi, h: Handle) -> Option<(RasterImage, PathBuf)> {
+    let Some(img) = fetch(host, h) else {
+        host.push_error(tr!("RT_TRANSP: l'entità non è un'immagine raster.", "RT_TRANSP: the entity is not a raster image."));
+        return None;
+    };
+    match resolve(&img.file_path, dwg_dir(host).as_deref()) {
+        Some(p) => Some((img, p)),
+        None => {
+            let path = img.file_path.clone();
+            host.push_error(&tr!(
+                format!("RT_TRANSP: file non trovato: \"{path}\". Ricollegalo prima con RT_PATH o RT_FIND."),
+                format!("RT_TRANSP: file not found: \"{path}\". Relink it first with RT_PATH or RT_FIND.")
+            ));
+            None
+        }
+    }
+}
+
+fn decode_or_report(host: &mut dyn HostApi, path: &Path) -> Option<(u32, u32, Vec<u8>)> {
+    match decode_rgba(path) {
+        Ok(d) => Some(d),
+        Err(e) => {
+            let name = file_name_only(&path.to_string_lossy()).to_string();
+            host.push_error(&tr!(
+                format!("RT_TRANSP: impossibile leggere \"{name}\": {e}"),
+                format!("RT_TRANSP: cannot read \"{name}\": {e}")
+            ));
+            None
+        }
+    }
+}
+
+/// `RT_TRANSPPICK <handle> <a> <b>` — frame pixel coordinates of the click:
+/// read the colour there and open the tolerance dialog.
+fn transp_pick(host: &mut dyn HostApi, args: &[&str]) {
+    let (Some(h), Some(a), Some(b)) =
+        (args.first().and_then(|t| parse_handle(t)), num(args.get(1).copied()), num(args.get(2).copied()))
+    else {
+        host.push_error(tr!("Uso: RT_TRANSPPICK <handle> <x_px> <y_px>", "Usage: RT_TRANSPPICK <handle> <x_px> <y_px>"));
+        return;
+    };
+    let Some((img, path)) = transp_source(host, h) else { return };
+    let Some((w, hh, mut px)) = decode_or_report(host, &path) else { return };
+    let Some((x, y)) = crate::pixels::file_pixel(a, b, img.size.x, img.size.y, w, hh) else {
+        host.push_error(tr!("RT_TRANSP: il punto è fuori dall'immagine.", "RT_TRANSP: the point is outside the image."));
+        return;
+    };
+    let pic = crate::pixels::Rgba { w, h: hh, px: &mut px };
+    let c = pic.get(x, y);
+    if c[3] == 0 {
+        host.push_error(tr!(
+            "RT_TRANSP: in quel punto l'immagine è già trasparente.",
+            "RT_TRANSP: the image is already transparent at that point."
+        ));
+        return;
+    }
+    let lossy = matches!(
+        path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
+        Some("jpg" | "jpeg" | "jpe" | "webp")
+    );
+    host.start_interactive(Box::new(tools::TranspDialog::new(h, x, y, [c[0], c[1], c[2]], lossy)));
+}
+
+/// `RT_TRANSPAPPLY <handle> <x> <y> <tolerance_%> ALL|AREA` — file pixel
+/// coordinates of the chosen colour.
+fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
+    let usage = tr!(
+        "Uso: RT_TRANSPAPPLY <handle> <x> <y> <tolleranza_%> ALL|AREA",
+        "Usage: RT_TRANSPAPPLY <handle> <x> <y> <tolerance_%> ALL|AREA"
+    );
+    let h = args.first().and_then(|t| parse_handle(t));
+    let (x, y, tol) = (num(args.get(1).copied()), num(args.get(2).copied()), num(args.get(3).copied()));
+    let (Some(h), Some(x), Some(y), Some(tol)) = (h, x, y, tol) else {
+        host.push_error(usage);
+        return;
+    };
+    let area = args.get(4).is_some_and(|m| m.eq_ignore_ascii_case("AREA"));
+    let Some((_img, path)) = transp_source(host, h) else { return };
+    let Some((w, hh, mut px)) = decode_or_report(host, &path) else { return };
+    if x < 0.0 || y < 0.0 || x >= w as f64 || y >= hh as f64 {
+        host.push_error(tr!("RT_TRANSP: il punto è fuori dall'immagine.", "RT_TRANSP: the point is outside the image."));
+        return;
+    }
+    let (x, y) = (x as u32, y as u32);
+    let mut pic = crate::pixels::Rgba { w, h: hh, px: &mut px };
+    let c = pic.get(x, y);
+    let key = [c[0], c[1], c[2]];
+    let changed =
+        crate::pixels::make_transparent(&mut pic, key, crate::pixels::tol_from_percent(tol), area.then_some((x, y)));
+    if changed == 0 {
+        host.push_info(tr!(
+            "RT_TRANSP: nessun pixel di quel colore da rendere trasparente.",
+            "RT_TRANSP: no pixels of that colour to make transparent."
+        ));
+        return;
+    }
+    let out = crate::pixels::transparent_copy_path(&path);
+    let saved = image::RgbaImage::from_raw(w, hh, px)
+        .ok_or_else(|| "buffer".to_string())
+        .and_then(|buf| buf.save_with_format(&out, image::ImageFormat::Png).map_err(|e| e.to_string()));
+    if let Err(e) = saved {
+        let dir = out.parent().map(|d| d.display().to_string()).unwrap_or_default();
+        host.push_error(&tr!(
+            format!("RT_TRANSP: impossibile salvare la copia trasparente in \"{dir}\": {e}"),
+            format!("RT_TRANSP: cannot save the transparent copy in \"{dir}\": {e}")
+        ));
+        return;
+    }
+    let out_s = out.to_string_lossy().to_string();
+    let groups = groups_for(host, Some(&[h]));
+    let mut done = 0;
+    for g in groups {
+        done += relink_group(host, g, &out_s, Some((w, hh)), "RT_TRANSP", true);
+    }
+    let pct = changed as f64 * 100.0 / (w as f64 * hh as f64);
+    let (hex, name) = (crate::pixels::hex_color(key), file_name_only(&out_s).to_string());
+    host.push_info(&tr!(
+        format!(
+            "RT_TRANSP: colore {hex} reso trasparente ({changed} pixel, {pct:.1}%) su {done} immagine/i. \
+             Copia salvata: {name} (l'originale non è stato modificato)."
+        ),
+        format!(
+            "RT_TRANSP: colour {hex} made transparent ({changed} pixels, {pct:.1}%) on {done} image(s). \
+             Copy saved: {name} (the original is unchanged)."
+        )
+    ));
+}
+
+/// Turn transparency off (the copy keeps its colours, so the picture shows
+/// as it was).
+fn transp_off(host: &mut dyn HostApi, handles: &[Handle]) {
+    let mut edits = Vec::new();
+    for h in handles {
+        if let Some(mut img) = fetch(host, *h) {
+            if img.flags.contains(ImageDisplayFlags::TRANSPARENCY_ON) {
+                img.flags &= !ImageDisplayFlags::TRANSPARENCY_ON;
+                edits.push(img);
+            }
+        }
+    }
+    if edits.is_empty() {
+        host.push_info(tr!(
+            "RT_TRANSPOFF: nessuna immagine con trasparenza attiva tra quelle scelte.",
+            "RT_TRANSPOFF: none of the chosen images has transparency on."
+        ));
+        return;
+    }
+    host.begin_undo_group("RT_TRANSPOFF");
+    let mut done = 0;
+    for img in edits {
+        if host.update_entity(EntityType::RasterImage(img)) {
+            done += 1;
+        }
+    }
+    host.end_undo_group();
+    if done > 0 {
+        host.set_dirty();
+    }
+    host.push_info(&tr!(
+        format!("RT_TRANSPOFF: trasparenza tolta da {done} immagine/i."),
+        format!("RT_TRANSPOFF: transparency turned off on {done} image(s).")
     ));
 }
 
@@ -1213,7 +1440,7 @@ fn relink(host: &mut dyn HostApi, targets: &[Handle], new_path: &str) {
     }
     let mut total = 0;
     for g in groups {
-        total += relink_group(host, g, &new_path, dims);
+        total += relink_group(host, g, &new_path, dims, "RT_PATH", false);
     }
     host.push_info(&tr!(format!("RT_PATH: {total} immagine/i collegata/e a \"{new_path}\"."), format!("RT_PATH: {total} image(s) linked to \"{new_path}\".")));
 }
@@ -1222,11 +1449,22 @@ fn relink(host: &mut dyn HostApi, targets: &[Handle], new_path: &str) {
 /// (and pixel aspect) when the new file's pixel count differs, then move the
 /// shared definition so the change is saved with the drawing. Returns the
 /// number of images updated.
-fn relink_group(host: &mut dyn HostApi, g: Group, new_path: &str, dims: Option<(u32, u32)>) -> usize {
+/// `transparent`: also turn the images' transparency on (`RT_TRANSP`).
+fn relink_group(
+    host: &mut dyn HostApi,
+    g: Group,
+    new_path: &str,
+    dims: Option<(u32, u32)>,
+    label: &str,
+    transparent: bool,
+) -> usize {
     let mut done = 0;
-    host.begin_undo_group("RT_PATH");
+    host.begin_undo_group(label);
     for mut img in g.images {
         img.file_path = new_path.to_string();
+        if transparent {
+            img.flags |= ImageDisplayFlags::TRANSPARENCY_ON;
+        }
         if let Some((nw, nh)) = dims {
             let (ow, oh) = (img.size.x, img.size.y);
             let (nw, nh) = (nw as f64, nh as f64);
@@ -1330,7 +1568,7 @@ fn find_in_folder(host: &mut dyn HostApi, picked: &Path, recurse: bool) {
             Some(found) => {
                 let p = found.to_string_lossy().to_string();
                 let dims = imgsize::read_dims(found).ok();
-                fixed += relink_group(host, g, &p, dims);
+                fixed += relink_group(host, g, &p, dims, "RT_FIND", false);
             }
             None => not_found.push(file_name_only(&g.path).to_string()),
         }

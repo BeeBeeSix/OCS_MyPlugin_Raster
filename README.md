@@ -19,6 +19,8 @@ in DWG/DXF drawings:
   ellipse;
 - **resize** by dragging a corner, or to an exact width / height / scale
   factor / **DPI**;
+- make **one colour transparent** (e.g. a scan's white background), picked
+  with a click on the image;
 - **change the file path** on disk and **find** images whose file was moved;
 - **list** every image with its path, pixels, size and file status.
 
@@ -39,6 +41,7 @@ Full command reference: [PLUGIN.md](PLUGIN.md).
 | cut out a detail and move it | **Split piece**, then `MOVE` the piece (it stays selected) |
 | bring a scan to 1:1 scale | select the image → **Size / DPI** → *DPI* mode, 300, millimetres |
 | enlarge by eye | **Drag**: fixed corner, then opposite corner |
+| drop a scan's white background | **Transparent colour**, click the image, click the white, *only the connected area* |
 | the photo was moved to another drive | **Find in folder** and pick a file in the new folder |
 | replace the photo with another | select the image → **Change path** → pick the file |
 
@@ -104,6 +107,7 @@ src/commands.rs     RT_* commands and drawing edits
 src/tools.rs        interactive tools (pick, rectangle, polygon, drag) and dialogs
 src/geom.rs         pure geometry: pixel ↔ drawing, clipping, scaling (tested)
 src/imgsize.rs      pixel size from the file header (tested)
+src/pixels.rs       transparent colour on RGBA pixels (tested)
 scripts/release.ps1 publish a new version
 CHANGELOG.md        changelog
 icons/              ribbon SVG icons

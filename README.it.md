@@ -21,6 +21,8 @@ TIFF e WebP nei disegni DWG/DXF:
   un cerchio o un'ellisse già nel disegno;
 - **ridimensionare** trascinando un angolo, oppure a larghezza / altezza /
   fattore di scala / **DPI** esatti;
+- rendere **trasparente un colore** (per esempio lo sfondo bianco di una
+  scansione), scelto con un clic sull'immagine;
 - **cambiare il percorso su disco** del file dell'immagine e **ritrovare** in
   una cartella le immagini il cui file è stato spostato;
 - **elencare** le immagini con percorso, pixel, dimensioni e stato del file.
@@ -42,6 +44,7 @@ Il riferimento completo dei comandi è in [PLUGIN.it.md](PLUGIN.it.md).
 | ritagliare un dettaglio e spostarlo | **Separa pezzo**, poi `SPOSTA` sul pezzo (resta selezionato) |
 | portare una scansione in scala 1:1 | seleziona l'immagine → **Dimensioni / DPI** → modo *DPI*, 300, millimetri |
 | ingrandire a occhio | **Trascina**: angolo fisso, poi angolo opposto |
+| togliere lo sfondo bianco di una scansione | **Colore trasparente**, clic sull'immagine, clic sul bianco, *solo l'area collegata* |
 | la foto è stata spostata su un altro disco | **Cerca in cartella** e scegli un file nella nuova cartella |
 | sostituire la foto con un'altra | seleziona l'immagine → **Cambia percorso** → scegli il file |
 
@@ -108,6 +111,7 @@ src/commands.rs  comandi RT_* e modifiche al disegno
 src/tools.rs     strumenti interattivi (selezione, rettangolo, trascinamento) e finestre
 src/geom.rs      geometria pura: pixel ↔ disegno, ritaglio, scala (con test)
 src/imgsize.rs   dimensioni in pixel dall'intestazione del file (con test)
+src/pixels.rs    colore trasparente sui pixel RGBA (con test)
 scripts/release.ps1  pubblicazione di una nuova versione
 CHANGELOG.md     registro delle modifiche
 icons/           icone SVG della scheda

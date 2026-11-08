@@ -23,6 +23,7 @@ pub mod i18n;
 pub mod commands;
 pub mod geom;
 pub mod imgsize;
+pub mod pixels;
 mod ribbon;
 pub mod tools;
 

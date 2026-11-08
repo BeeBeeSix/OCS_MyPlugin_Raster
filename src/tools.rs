@@ -1148,3 +1148,173 @@ impl InteractiveCommand for AttachTool {
         }
     }
 }
+
+// ── RT_TRANSP: pick the image, then the colour ─────────────────────────────
+
+pub struct TranspTool {
+    images: Vec<Snapshot>,
+    target: Option<usize>,
+    msg: Option<String>,
+}
+
+impl TranspTool {
+    pub fn new(images: Vec<Snapshot>, preselected: Option<Handle>) -> Self {
+        let target = preselected.and_then(|h| index_of(&images, h));
+        TranspTool { images, target, msg: None }
+    }
+
+    fn choose(&mut self, idx: Option<usize>) -> CommandStep {
+        match idx {
+            Some(i) => {
+                self.target = Some(i);
+                self.msg = None;
+            }
+            None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
+        }
+        CommandStep::NeedPoint
+    }
+}
+
+impl InteractiveCommand for TranspTool {
+    fn prompt(&self) -> String {
+        let p = match self.target {
+            None => tr!("RT_TRANSP: seleziona l'immagine", "RT_TRANSP: select the image").to_string(),
+            Some(_) => tr!(
+                "RT_TRANSP: clicca sull'immagine il colore da rendere trasparente",
+                "RT_TRANSP: click the colour to make transparent on the image"
+            )
+            .to_string(),
+        };
+        with_msg(&self.msg, p)
+    }
+
+    fn on_point(&mut self, pt: [f64; 3]) -> CommandStep {
+        let Some(t) = self.target else {
+            let i = hit(&self.images, pt);
+            return self.choose(i);
+        };
+        let snap = &self.images[t];
+        let Some(p) = snap.frame.to_pixel(pt) else {
+            self.msg = Some(tr!("l'immagine ha una cornice degenere", "the image has a degenerate frame").into());
+            return CommandStep::NeedPoint;
+        };
+        // Only the part that shows can be clicked.
+        if !snap.frame.contains(pt) || !geom::point_in_polygon(&snap.visible, p) {
+            self.msg = Some(tr!("clicca dentro la parte visibile dell'immagine", "click inside the visible part of the image").into());
+            return CommandStep::NeedPoint;
+        }
+        CommandStep::Dispatch(format!("RT_TRANSPPICK {:X} {} {}", snap.handle.value(), p[0], p[1]))
+    }
+
+    fn on_enter(&mut self) -> CommandStep {
+        CommandStep::Cancel
+    }
+
+    fn needs_object_pick(&self) -> bool {
+        self.target.is_none()
+    }
+
+    fn on_object_pick(&mut self, handle: Handle, pt: [f64; 3]) -> CommandStep {
+        let i = index_of(&self.images, handle).or_else(|| hit(&self.images, pt));
+        self.choose(i)
+    }
+
+    fn on_cursor_move(&mut self, pt: [f64; 3]) -> Vec<PreviewWire> {
+        match self.target {
+            None => hit(&self.images, pt)
+                .map(|i| vec![PreviewWire::with_color(self.images[i].outline(), CYAN)])
+                .unwrap_or_default(),
+            Some(t) => {
+                // A small crosshair marks the pixel that will be sampled.
+                let snap = &self.images[t];
+                let (fw, fh) = snap.frame.world_size();
+                let r = (fw.hypot(fh) * 0.01).max(1e-9);
+                vec![
+                    PreviewWire::with_color(snap.visible_outline(), CYAN),
+                    PreviewWire::line([pt[0] - r, pt[1], pt[2]], [pt[0] + r, pt[1], pt[2]], Some(ORANGE)),
+                    PreviewWire::line([pt[0], pt[1] - r, pt[2]], [pt[0], pt[1] + r, pt[2]], Some(ORANGE)),
+                ]
+            }
+        }
+    }
+}
+
+pub struct TranspDialog {
+    handle: Handle,
+    x: u32,
+    y: u32,
+    def: DialogDef,
+    done: bool,
+}
+
+impl TranspDialog {
+    /// `lossy`: JPEG/WebP, whose colours are never perfectly even — a higher
+    /// default tolerance.
+    pub fn new(handle: Handle, x: u32, y: u32, color: [u8; 3], lossy: bool) -> Self {
+        let hex = crate::pixels::hex_color(color);
+        let [r, g, b] = color;
+        let def = DialogDef::new(tr!("Colore trasparente", "Transparent colour"))
+            .with_control(info(tr!(
+                format!("Colore scelto: {hex}  (R {r}, G {g}, B {b})"),
+                format!("Chosen colour: {hex}  (R {r}, G {g}, B {b})")
+            )))
+            .with_control(DialogControl::Number {
+                id: "tol".into(),
+                label: tr!(
+                    "Tolleranza % (0 = solo questo colore esatto)",
+                    "Tolerance % (0 = this exact colour only)"
+                )
+                .into(),
+                default: if lossy { 10.0 } else { 2.0 },
+                min: Some(0.0),
+                max: Some(100.0),
+                step: Some(1.0),
+            })
+            .with_control(DialogControl::Checkbox {
+                id: "area".into(),
+                label: tr!(
+                    "Solo l'area collegata al punto cliccato",
+                    "Only the area connected to the clicked point"
+                )
+                .into(),
+                default: false,
+            })
+            .with_control(info(
+                tr!(
+                    "Viene creata una copia PNG accanto al file originale, che non viene modificato. \
+                     Per tornare indietro: Annulla (Ctrl+Z) oppure RT_TRANSPOFF.",
+                    "A PNG copy is created next to the original file, which is left unchanged. \
+                     To go back: Undo (Ctrl+Z) or RT_TRANSPOFF."
+                )
+                .into(),
+            ))
+            .submit_label(tr!("Rendi trasparente", "Make transparent"))
+            .cancel_label(tr!("Annulla", "Cancel"))
+            .width(500.0);
+        TranspDialog { handle, x, y, def, done: false }
+    }
+}
+
+impl InteractiveCommand for TranspDialog {
+    fn prompt(&self) -> String {
+        tr!("RT_TRANSP: imposta la tolleranza nella finestra", "RT_TRANSP: set the tolerance in the dialog").into()
+    }
+    fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+        CommandStep::NeedPoint
+    }
+    fn on_enter(&mut self) -> CommandStep {
+        CommandStep::Cancel
+    }
+    fn modal_dialog(&self) -> Option<DialogDef> {
+        (!self.done).then(|| self.def.clone())
+    }
+    fn on_dialog_response(&mut self, response: DialogResponse) -> CommandStep {
+        self.done = true;
+        let DialogResponse::Submitted(m) = response else {
+            return CommandStep::Cancel;
+        };
+        let tol = get_num(&m, "tol").unwrap_or(0.0).clamp(0.0, 100.0);
+        let mode = if get_bool(&m, "area", false) { "AREA" } else { "ALL" };
+        CommandStep::Dispatch(format!("RT_TRANSPAPPLY {:X} {} {} {} {}", self.handle.value(), self.x, self.y, tol, mode))
+    }
+}

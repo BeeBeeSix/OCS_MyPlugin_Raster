@@ -80,6 +80,13 @@ impl CadModule for RasterModule {
                     ],
                 },
                 RibbonGroup {
+                    title: tr!("Trasparenza", "Transparency"),
+                    tools: vec![
+                        cmd("RT_TRANSP", tr!("Colore trasparente", "Transparent colour"), include_bytes!("../icons/transp.svg")),
+                        cmd("RT_TRANSPOFF", tr!("Togli trasparenza", "Transparency off"), include_bytes!("../icons/transpoff.svg")),
+                    ],
+                },
+                RibbonGroup {
                     title: tr!("Dimensioni", "Size"),
                     tools: vec![
                         cmd("RT_RESIZE", tr!("Trascina", "Drag"), include_bytes!("../icons/resize.svg")),

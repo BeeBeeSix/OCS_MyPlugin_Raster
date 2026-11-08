@@ -12,6 +12,23 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.5.0] - 2026-11-08
+
+### Aggiunto
+- **Colore trasparente** (`RT_TRANSP`, scheda Raster › Trasparenza): si sceglie
+  l'immagine, poi si clicca **direttamente sull'immagine** il colore da rendere
+  trasparente (per esempio lo sfondo bianco di una scansione). Una finestra mostra
+  il colore scelto e chiede la **tolleranza** (per i colori simili; 10% proposto per
+  JPG, 2% per gli altri formati) e se agire su tutta l'immagine o **solo sull'area
+  collegata al punto cliccato**. Il plugin salva una copia PNG con la trasparenza
+  accanto all'originale (`<nome>_trasp-N.png`, l'originale non viene toccato),
+  ricollega l'immagine alla copia e attiva la trasparenza. Il comando si può
+  ripetere per togliere altri colori.
+- `RT_TRANSPOFF` (Togli trasparenza): spegne la trasparenza delle immagini.
+  *Transparent colour: `RT_TRANSP` picks an image, then the colour to drop with a
+  click on the image (tolerance, whole image or connected area only); a PNG copy
+  is saved next to the original. `RT_TRANSPOFF` turns transparency off.*
+
 ## [0.4.0] - 2026-11-05
 
 ### Aggiunto

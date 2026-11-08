@@ -7,7 +7,7 @@ che gestisce le immagini raster collegate al disegno (entità IMAGE):
 GIF, JPG, PNG, BMP, TIFF e WebP — gli stessi formati che il CAD visualizza.
 
 Tutti i comandi hanno il prefisso `RT_`. La scheda **Raster** della barra
-multifunzione li raccoglie in quattro gruppi: *Inserisci*, *Ritaglio*, *Dimensioni*, *File*.
+multifunzione li raccoglie in cinque gruppi: *Inserisci*, *Ritaglio*, *Trasparenza*, *Dimensioni*, *File*.
 Nel gruppo *Ritaglio*, i pulsanti *Ritaglia*, *Foro* e *Separa pezzo* hanno un
 menu (freccia ▾) per scegliere il contorno: **Rettangolo**, **Poligono** o
 **Da polilinea**; il clic sul pulsante usa il rettangolo.
@@ -41,6 +41,8 @@ Studio.
 | `RT_CLIPPOLY` / `RT_HOLEPOLY` / `RT_CUTPOLY` | Ritaglia / Foro / Separa pezzo › Poligono | Come le tre righe sopra, ma con un **poligono** di qualsiasi forma, anche concava (a "L", a stella…): si sceglie l'immagine e si cliccano i vertici; **Invio** o un clic vicino al primo vertice chiudono il poligono (servono almeno 3 vertici). |
 | `RT_CLIPPL` / `RT_HOLEPL` / `RT_CUTPL` | Ritaglia / Foro / Separa pezzo › Da polilinea | Come sopra, usando come contorno una **polilinea chiusa** (anche con lati ad arco), un **cerchio** o un'**ellisse** già disegnati: si sceglie l'immagine, poi si clicca la polilinea o un punto al suo interno. Se immagine e polilinea sono già selezionate, il ritaglio è immediato. Gli archi sono approssimati con segmenti di 3°. |
 | `RT_UNCLIP` | Ritaglio › Togli ritaglio | Toglie il ritaglio alle immagini selezionate (o a quella indicata). |
+| `RT_TRANSP` | Trasparenza › Colore trasparente | Rende **trasparente un colore** dell'immagine. Si sceglie l'immagine (o la si seleziona prima), poi si **clicca sull'immagine** il colore da togliere (un mirino arancione segue il cursore). Una finestra mostra il colore (esadecimale e RGB) e chiede la **tolleranza** in % (0 = solo quel colore esatto; proposti 10% per JPG/WebP, che alterano leggermente i colori, e 2% per gli altri) e se agire su **tutta l'immagine** o **solo sull'area collegata al punto cliccato** (utile per togliere lo sfondo esterno lasciando lo stesso colore all'interno del disegno). Il plugin salva una **copia PNG** con la trasparenza nella cartella dell'originale, `<nome>_trasp-N.png` (l'originale non viene modificato), ricollega l'immagine alla copia e attiva la trasparenza. Ripetendo il comando si tolgono altri colori: ogni volta nasce una nuova copia. Annullabile con `U` / Ctrl+Z. |
+| `RT_TRANSPOFF` | Trasparenza › Togli trasparenza | Spegne la trasparenza delle immagini selezionate (o di quella scelta): i colori tolti tornano visibili. Per tornare al file originale usare `RT_PATH`. |
 | `RT_RESIZE` | Dimensioni › Trascina | Ridimensionamento grafico proporzionale: si sceglie l'immagine, si clicca vicino all'angolo che deve **restare fermo**, poi si porta l'angolo opposto alla nuova posizione (anteprima arancione). Gli angoli sono quelli della parte visibile. |
 | `RT_SIZE` | Dimensioni › Dimensioni / DPI | Finestra con: larghezza o altezza (proporzionali), larghezza e altezza libere, fattore di scala, oppure **risoluzione di stampa** (DPI) con l'unità del disegno (mm, cm, m, pollici). Punto fisso: angolo in basso a sinistra o centro. Opzione per riferire le misure alla parte visibile. Agisce su tutte le immagini selezionate. |
 | `RT_PATH` | File › Cambia percorso | Cambia il **file su disco** dell'immagine. Dalla barra si apre subito il selettore file e il percorso si applica alle immagini selezionate (se non ce ne sono, si indica l'immagine dopo). Digitato senza argomenti apre una finestra con il percorso attuale e il suo stato. Tutte le immagini che usano lo stesso file vengono ricollegate; la **larghezza nel disegno resta la stessa** anche se il nuovo file ha un numero diverso di pixel (l'eventuale ritaglio viene riproporzionato). |
@@ -79,6 +81,8 @@ Gli handle sono esadecimali; più handle separati da virgola.
 | `RT_SCALEAPPLY <h> <ancora_x_px> <ancora_y_px> <fattore_x> [fattore_y]` | Scala attorno a un punto espresso in pixel dell'immagine (0,0 = angolo di inserimento). |
 | `RT_SIZEAPPLY <h,...> W\|H\|WH\|F\|DPI <larg> <alt> <fattore> <dpi> MM\|CM\|M\|IN BL\|CTR FULL\|VIS` | Come la finestra di `RT_SIZE`. Es.: `RT_SIZEAPPLY 2A DPI 0 0 0 300 MM BL FULL`. |
 | `RT_SIZEDLG <h,...>` / `RT_PATHDLG <h,...>` | Apre la finestra per quelle immagini. |
+| `RT_TRANSPAPPLY <h> <x_px> <y_px> <tolleranza_%> ALL\|AREA` | Rende trasparente il colore del pixel del file (`x`, `y` da in alto a sinistra), su tutta l'immagine o solo sull'area collegata. |
+| `RT_TRANSPOFFAPPLY <h,...>` | Spegne la trasparenza. |
 
 `RT_PATHAPPLY`, `RT_FINDAPPLY`, `RT_ATTACHPLACE` e `RT_ATTACHAPPLY` usano il percorso scelto nella finestra appena
 chiusa (i percorsi non passano mai per la riga di comando, che può
@@ -89,7 +93,9 @@ convertirli in maiuscolo).
 Il plugin non aggiunge XDATA né oggetti propri: modifica solo i campi standard
 dell'entità IMAGE (punto di inserimento, vettori U/V, dimensione in pixel,
 contorno e modalità di ritaglio, percorso), quindi il disegno resta leggibile
-da qualunque programma DWG/DXF anche senza il plugin.
+da qualunque programma DWG/DXF anche senza il plugin. `RT_TRANSP` in più scrive
+la copia PNG `<nome>_trasp-N.png` accanto al file originale e accende il flag
+standard "trasparenza" dell'immagine.
 
 ## Compilazione e installazione
 
