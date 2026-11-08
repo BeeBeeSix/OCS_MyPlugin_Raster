@@ -4,6 +4,7 @@
 //! an apply command (see `commands.rs`).
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use ocs_plugin_api::dialog::{DialogControl, DialogDef, DialogResponse, DialogValue};
 use ocs_plugin_api::host::codec;
@@ -96,6 +97,32 @@ pub struct PickTool {
     msg: Option<String>,
 }
 
+/// Arguments of a command handed to the host as a bare verb (see
+/// [`deferred`]).
+static DEFERRED: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+/// Hand `verb args` to the host as the bare `verb`, keeping `args` here.
+///
+/// Needed when the command opens a dialog or a new interactive step: the
+/// host runs a multi-word line by dispatching it and then feeding the words
+/// after the verb — and a final Enter — to whatever command is active, which
+/// is the step just opened. That Enter ended the step at once (the dialog
+/// still showed, but its button then did nothing). A single word is
+/// dispatched with nothing fed after it.
+pub fn deferred(verb: &str, args: String) -> CommandStep {
+    *DEFERRED.lock().unwrap_or_else(|e| e.into_inner()) = Some((verb.to_string(), args));
+    CommandStep::Dispatch(verb.to_string())
+}
+
+/// The arguments [`deferred`] kept for `verb`, once.
+pub fn take_deferred(verb: &str) -> Option<String> {
+    let mut slot = DEFERRED.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.as_ref().is_some_and(|(v, _)| v.eq_ignore_ascii_case(verb)) {
+        return slot.take().map(|(_, a)| a);
+    }
+    None
+}
+
 impl PickTool {
     pub fn new(images: Vec<Snapshot>, verb: &'static str, what: &'static str) -> Self {
         PickTool { images, verb, what, msg: None }
@@ -103,7 +130,7 @@ impl PickTool {
 
     fn take(&mut self, idx: Option<usize>) -> CommandStep {
         match idx {
-            Some(i) => CommandStep::Dispatch(format!("{} {:X}", self.verb, self.images[i].handle.value())),
+            Some(i) => deferred(self.verb, format!("{:X}", self.images[i].handle.value())),
             None => {
                 self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into());
                 CommandStep::NeedPoint
@@ -1045,8 +1072,8 @@ impl InteractiveCommand for AttachDialog {
         commands::set_pending_path(path);
         let mode = ATTACH_MODES[get_choice(&m, "mode").min(ATTACH_MODES.len() - 1)].0;
         let unit = UNITS[get_choice(&m, "unit").min(UNITS.len() - 1)].0;
-        CommandStep::Dispatch(format!(
-            "RT_ATTACHPLACE {} {} {} {}",
+        deferred("RT_ATTACHPLACE", format!(
+            "{} {} {} {}",
             mode,
             get_num(&m, "width").unwrap_or(0.0),
             get_num(&m, "dpi").unwrap_or(0.0),
@@ -1203,7 +1230,7 @@ impl InteractiveCommand for TranspTool {
             self.msg = Some(tr!("clicca dentro la parte visibile dell'immagine", "click inside the visible part of the image").into());
             return CommandStep::NeedPoint;
         }
-        CommandStep::Dispatch(format!("RT_TRANSPPICK {:X} {} {}", snap.handle.value(), p[0], p[1]))
+        deferred("RT_TRANSPPICK", format!("{:X} {} {}", snap.handle.value(), p[0], p[1]))
     }
 
     fn on_enter(&mut self) -> CommandStep {

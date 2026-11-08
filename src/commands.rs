@@ -309,8 +309,13 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
     }
     // Follow a language change made in the CAD since the last command.
     crate::i18n::refresh();
-    // Everything after the verb, case and spaces intact (paths).
-    let rest = trimmed[verb.len()..].trim();
+    // Everything after the verb, case and spaces intact (paths) — or, for a
+    // bare verb, the arguments a tool kept for it (`tools::deferred`).
+    let mut rest = trimmed[verb.len()..].trim();
+    let kept = if rest.is_empty() { tools::take_deferred(&verb) } else { None };
+    if let Some(k) = kept.as_deref() {
+        rest = k;
+    }
     let args: Vec<&str> = rest.split_whitespace().collect();
 
     match verb.as_str() {

@@ -12,6 +12,18 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.6.1] - 2026-11-08
+
+### Corretto
+- **Il pulsante "Rendi trasparente" non faceva nulla.** La finestra si apriva, ma
+  il CAD la chiudeva subito "dietro le quinte" e il pulsante restava senza effetto.
+  Lo stesso difetto poteva bloccare anche altri passaggi aperti dopo aver scelto
+  l'immagine: "Inserisci immagine" (scelta del punto) e "Dimensioni / DPI" o
+  "Cambia percorso" senza immagine selezionata prima.
+  *Fixed: the "Make transparent" button did nothing; the same flaw could also
+  stop "Insert image" placement and the Size / Change path dialogs opened after
+  picking an image.*
+
 ## [0.6.0] - 2026-11-08
 
 ### Modificato
