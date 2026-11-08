@@ -12,6 +12,21 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.5.1] - 2026-11-08
+
+### Corretto
+- **Colore trasparente su scansioni grandi.** Con immagini molto grandi (per esempio
+  una mappa catastale da 7000 × 10000 pixel) il comando si interrompeva senza
+  messaggi: salvare la copia PNG richiedeva più dei 30 secondi che Open CAD Studio
+  concede a un comando del plugin. Ora il salvataggio è molto più veloce, il plugin
+  tiene informato il CAD mentre lavora e mostra un messaggio "attendere…" per le
+  immagini grandi; usa anche meno memoria.
+- Se la stessa immagine è inserita più volte nel disegno (copie sovrapposte),
+  `RT_TRANSP` ricollega alla copia trasparente tutte le copie dello stesso file:
+  prima una copia ancora opaca poteva coprire quella resa trasparente.
+  *Transparent colour now works on large scans (fast PNG saving, no 30-second
+  timeout) and on images inserted several times.*
+
 ## [0.5.0] - 2026-11-08
 
 ### Aggiunto

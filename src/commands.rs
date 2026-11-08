@@ -785,22 +785,73 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
 type Decoded = (PathBuf, Option<std::time::SystemTime>, u32, u32, Vec<u8>);
 static DECODED: Mutex<Option<Decoded>> = Mutex::new(None);
 
-/// RGBA8 pixels of the file behind an image entity.
-fn decode_rgba(path: &Path) -> Result<(u32, u32, Vec<u8>), String> {
+/// RGBA8 pixels of the file behind an image entity. `keep`: leave a copy in
+/// the cache for the next step (picking keeps it, applying takes it — a scan
+/// of 70 megapixels is 280 MB, not worth holding twice).
+fn decode_rgba(path: &Path, keep: bool) -> Result<(u32, u32, Vec<u8>), String> {
     let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
     {
-        let cache = DECODED.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((p, t, w, h, px)) = cache.as_ref() {
-            if p == path && *t == mtime {
+        let mut cache = DECODED.lock().unwrap_or_else(|e| e.into_inner());
+        let hit = cache.as_ref().is_some_and(|(p, t, ..)| p == path && *t == mtime);
+        if hit {
+            if keep {
+                let (_, _, w, h, px) = cache.as_ref().expect("hit");
                 return Ok((*w, *h, px.clone()));
             }
+            let (_, _, w, h, px) = cache.take().expect("hit");
+            return Ok((w, h, px));
         }
+        *cache = None;
     }
     let rgba = image::open(path).map_err(|e| e.to_string())?.to_rgba8();
     let (w, h) = rgba.dimensions();
     let px = rgba.into_raw();
-    *DECODED.lock().unwrap_or_else(|e| e.into_inner()) = Some((path.to_path_buf(), mtime, w, h, px.clone()));
+    if keep {
+        *DECODED.lock().unwrap_or_else(|e| e.into_inner()) = Some((path.to_path_buf(), mtime, w, h, px.clone()));
+    }
     Ok((w, h, px))
+}
+
+/// A writer that, while a large PNG is being written, pings the host every
+/// few seconds: the host gives up on a plugin call that stays silent for
+/// 30 seconds, and any request from the plugin restarts that clock.
+struct Heartbeat<'b, 'h, W: std::io::Write> {
+    inner: W,
+    host: &'b mut (dyn HostApi + 'h),
+    last: std::time::Instant,
+}
+
+impl<W: std::io::Write> std::io::Write for Heartbeat<'_, '_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.last.elapsed() >= std::time::Duration::from_secs(3) {
+            let _ = self.host.selection();
+            self.last = std::time::Instant::now();
+        }
+        self.inner.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// Save RGBA8 pixels as a PNG, with fast compression (a 70-megapixel scan
+/// takes seconds instead of minutes) and the host kept informed.
+fn save_png(host: &mut dyn HostApi, out: &Path, w: u32, h: u32, px: &[u8]) -> Result<(), String> {
+    use image::ImageEncoder;
+    let file = std::fs::File::create(out).map_err(|e| e.to_string())?;
+    let mut writer = Heartbeat { inner: std::io::BufWriter::with_capacity(1 << 20, file), host, last: std::time::Instant::now() };
+    let result = image::codecs::png::PngEncoder::new_with_quality(
+        &mut writer,
+        image::codecs::png::CompressionType::Fast,
+        image::codecs::png::FilterType::Up,
+    )
+    .write_image(px, w, h, image::ExtendedColorType::Rgba8)
+    .map_err(|e| e.to_string())
+    .and_then(|_| std::io::Write::flush(&mut writer).map_err(|e| e.to_string()));
+    if result.is_err() {
+        let _ = std::fs::remove_file(out);
+    }
+    result
 }
 
 /// The image entity and the file it shows, or an error already reported.
@@ -822,8 +873,8 @@ fn transp_source(host: &mut dyn HostApi, h: Handle) -> Option<(RasterImage, Path
     }
 }
 
-fn decode_or_report(host: &mut dyn HostApi, path: &Path) -> Option<(u32, u32, Vec<u8>)> {
-    match decode_rgba(path) {
+fn decode_or_report(host: &mut dyn HostApi, path: &Path, keep: bool) -> Option<(u32, u32, Vec<u8>)> {
+    match decode_rgba(path, keep) {
         Ok(d) => Some(d),
         Err(e) => {
             let name = file_name_only(&path.to_string_lossy()).to_string();
@@ -846,7 +897,7 @@ fn transp_pick(host: &mut dyn HostApi, args: &[&str]) {
         return;
     };
     let Some((img, path)) = transp_source(host, h) else { return };
-    let Some((w, hh, mut px)) = decode_or_report(host, &path) else { return };
+    let Some((w, hh, mut px)) = decode_or_report(host, &path, true) else { return };
     let Some((x, y)) = crate::pixels::file_pixel(a, b, img.size.x, img.size.y, w, hh) else {
         host.push_error(tr!("RT_TRANSP: il punto è fuori dall'immagine.", "RT_TRANSP: the point is outside the image."));
         return;
@@ -882,7 +933,8 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
     };
     let area = args.get(4).is_some_and(|m| m.eq_ignore_ascii_case("AREA"));
     let Some((_img, path)) = transp_source(host, h) else { return };
-    let Some((w, hh, mut px)) = decode_or_report(host, &path) else { return };
+    let big = |w: u32, h: u32| w as u64 * h as u64 >= 8_000_000;
+    let Some((w, hh, mut px)) = decode_or_report(host, &path, false) else { return };
     if x < 0.0 || y < 0.0 || x >= w as f64 || y >= hh as f64 {
         host.push_error(tr!("RT_TRANSP: il punto è fuori dall'immagine.", "RT_TRANSP: the point is outside the image."));
         return;
@@ -901,9 +953,15 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
         return;
     }
     let out = crate::pixels::transparent_copy_path(&path);
-    let saved = image::RgbaImage::from_raw(w, hh, px)
-        .ok_or_else(|| "buffer".to_string())
-        .and_then(|buf| buf.save_with_format(&out, image::ImageFormat::Png).map_err(|e| e.to_string()));
+    if big(w, hh) {
+        let mpx = w as f64 * hh as f64 / 1e6;
+        host.push_info(&tr!(
+            format!("RT_TRANSP: salvataggio della copia PNG ({w}×{hh} px, {mpx:.0} megapixel), attendere…"),
+            format!("RT_TRANSP: saving the PNG copy ({w}×{hh} px, {mpx:.0} megapixels), please wait…")
+        ));
+    }
+    let saved = save_png(host, &out, w, hh, &px);
+    drop(px);
     if let Err(e) = saved {
         let dir = out.parent().map(|d| d.display().to_string()).unwrap_or_default();
         host.push_error(&tr!(
@@ -913,7 +971,11 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
         return;
     }
     let out_s = out.to_string_lossy().to_string();
-    let groups = groups_for(host, Some(&[h]));
+    let mut targets = images_showing(host, &path);
+    if !targets.contains(&h) {
+        targets.push(h);
+    }
+    let groups = groups_for(host, Some(&targets));
     let mut done = 0;
     for g in groups {
         done += relink_group(host, g, &out_s, Some((w, hh)), "RT_TRANSP", true);
@@ -930,6 +992,24 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
              Copy saved: {name} (the original is unchanged)."
         )
     ));
+}
+
+/// Every image whose file resolves to `path` — copies inserted several
+/// times may each have their own definition, and an opaque copy stacked on
+/// the same spot would hide the transparency.
+fn images_showing(host: &dyn HostApi, path: &Path) -> Vec<Handle> {
+    let dir = dwg_dir(host);
+    let norm = |p: &Path| p.to_string_lossy().replace('/', "\\").replace("\\.\\", "\\").to_lowercase();
+    let want = norm(path);
+    host.document()
+        .entities()
+        .filter_map(|e| match e {
+            EntityType::RasterImage(i) => Some(i),
+            _ => None,
+        })
+        .filter(|i| resolve(&i.file_path, dir.as_deref()).is_some_and(|p| norm(&p) == want))
+        .map(|i| i.common.handle)
+        .collect()
 }
 
 /// Turn transparency off (the copy keeps its colours, so the picture shows
