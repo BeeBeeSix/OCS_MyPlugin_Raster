@@ -94,12 +94,12 @@ Numerazione: `0.4.1` per le sole correzioni, `0.5.0` per nuove funzioni,
 
 ## Compatibilità
 
-Compilato contro `ocs_plugin_api` del tag **v2026.44** (Plugin API 14), come il
-plugin di esempio Land Survey. La libreria DWG `acadrust` viene scaricata dal
-repository del suo autore tramite un `[patch]` in `Cargo.toml` (ha lasciato
-l'indirizzo indicato da quella versione). Per una versione successiva del CAD, aggiorna
-`rev` in `Cargo.toml` con il commit del nuovo tag e `api_version` in
-`plugin.toml`.
+Compilato contro `ocs_plugin_api` del tag **v2026.45** (Plugin API 16). Ogni
+compilazione del plugin funziona solo con la versione di Open CAD Studio per cui
+è stata fatta (il CAD controlla che plugin e programma si scambino i dati del
+disegno nello stesso formato): per la **v2026.44 usa il plugin 0.5.1**. Per una
+versione successiva del CAD, aggiorna `rev` in `Cargo.toml` con il commit del
+nuovo tag e `api_version` in `plugin.toml`.
 
 ## Struttura
 

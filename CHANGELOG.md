@@ -12,6 +12,15 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.6.0] - 2026-11-08
+
+### Modificato
+- **Compatibile con Open CAD Studio 2026.45** (Plugin API 16). La 2026.45 rifiuta
+  i plugin compilati per la versione precedente (all'avvio dava errore sui
+  plugin). Questa versione funziona **solo con la 2026.45**: chi usa ancora la
+  2026.44 resti alla 0.5.1.
+  *Built for Open CAD Studio 2026.45 (API 16); for 2026.44 stay on 0.5.1.*
+
 ## [0.5.1] - 2026-11-08
 
 ### Corretto

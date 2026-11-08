@@ -91,11 +91,11 @@ plugin is considered stable.
 
 ## Compatibility
 
-Built against `ocs_plugin_api` from tag **v2026.44** (Plugin API 14). The DWG
-library `acadrust` is fetched from its author's repository through a
-`[patch]` in `Cargo.toml` (it left the address that release refers to). For a
-later CAD release, set `rev` in `Cargo.toml` to that release tag's commit and
-`api_version` in `plugin.toml`.
+Built against `ocs_plugin_api` from tag **v2026.45** (Plugin API 16). Each
+plugin build works only with the Open CAD Studio release it was built for (the
+CAD checks that plugin and host exchange drawing data in the same format):
+for **v2026.44 use plugin 0.5.1**. For a later CAD release, set `rev` in
+`Cargo.toml` to that release tag's commit and `api_version` in `plugin.toml`.
 
 ## Layout
 

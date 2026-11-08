@@ -1,6 +1,6 @@
 [package]
 name = "opencad-raster-plugin"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 description = "Raster Tools add-on for Open CAD Studio — rectangular clip / hole / split, resize (drag, size, DPI), relink and find moved GIF/JPG/PNG/BMP/TIFF/WebP images."
 license = "GPL-3.0-only"
@@ -13,15 +13,16 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # The stable contract, with the runtime `host` surface (HostApi / BuiltinPlugin).
-# Pinned to the v2026.44 RELEASE TAG commit (Plugin API 14), the same pin as
-# opencad-landsurvey-plugin. The host's entity model comes re-exported as
+# Pinned to the v2026.45 RELEASE TAG commit (Plugin API 16). The host refuses
+# a plugin whose codec types differ from its own (wire schema check), so a
+# build works only with the CAD release it was pinned to. The host's entity model comes re-exported as
 # `ocs_plugin_api::host::codec`, so plugin and host share one set of codec
 # types and no separate codec dependency is declared here.
 #
 # To target a newer Open CAD Studio release, replace `rev` with that release
 # tag's commit (`git ls-remote --tags https://github.com/HakanSeven12/OpenCADStudio`)
 # and update `api_version` in plugin.toml to the API_VERSION it exports.
-ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", rev = "0e77cae652271d08c7619238e619f9b6668ae17c", features = ["host"] }
+ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", rev = "fb0a667e269b6c924233ecd450a11dd7cba40eea", features = ["host"] }
 # Reads Open CAD Studio's settings.json to follow its interface language.
 serde_json = "1"
 # Decode the image files (same decoders as Open CAD Studio) and write the
@@ -34,10 +35,3 @@ codegen-units = 1
 strip = "debuginfo"
 
 [workspace]
-
-# The DWG library the host's codec is built on moved from
-# github.com/HakanSeven12/acadrust (no longer public) back to its author's
-# repository. Same commit, new address: without this, a fresh build cannot
-# download it.
-[patch."https://github.com/HakanSeven12/acadrust.git"]
-acadrust = { git = "https://github.com/hakanaktt/acadrust.git", rev = "53e6420c4df4d207409798c2719d32fc6cf2811d" }
