@@ -12,6 +12,22 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.7.0] - 2026-11-09
+
+### Aggiunto
+- **Colorare la mappa con il colore del layer** (`RT_TRANSP`). Nella finestra
+  "Colore trasparente" c'è la nuova opzione *Colora il resto con il colore del
+  layer*: lo sfondo sparisce e tutto il resto prende il colore del layer
+  dell'immagine, con i bordi sfumati. Le linee nere di una mappa catastale
+  diventano per esempio bianche e ben leggibili sullo sfondo scuro, senza l'alone
+  chiaro e le linee "sgranate" che lasciava la sola trasparenza. È attiva di serie
+  quando il colore scelto è chiaro (la carta di una scansione).
+- **Layer dell'immagine inserita** (`RT_ATTACH`). La finestra di inserimento chiede
+  il layer: viene proposto **RASTER**, creato (bianco) se nel disegno non esiste,
+  oppure un altro layer a scelta.
+  *Colour a scanned map with its layer's colour (soft edges, readable on the dark
+  background); `RT_ATTACH` asks for the layer, RASTER by default.*
+
 ## [0.6.2] - 2026-11-08
 
 ### Aggiunto

@@ -1009,11 +1009,41 @@ const ATTACH_MODES: Options = &[
 pub struct AttachDialog {
     def: DialogDef,
     done: bool,
+    /// The layer list shown: (name, needs creating).
+    layers: Vec<(String, bool)>,
+}
+
+/// Layer choices for a new image: RASTER first (marked new when the drawing
+/// has none), then the drawing's other layers. The default is RASTER.
+pub fn attach_layer_options(existing: &[String]) -> Vec<(String, bool)> {
+    let raster = commands::RASTER_LAYER;
+    let found = existing.iter().find(|n| n.eq_ignore_ascii_case(raster));
+    let mut out = vec![match found {
+        Some(n) => (n.clone(), false),
+        None => (raster.to_string(), true),
+    }];
+    out.extend(existing.iter().filter(|n| !n.eq_ignore_ascii_case(raster)).map(|n| (n.clone(), false)));
+    out
 }
 
 impl AttachDialog {
-    /// `unit_index` preselects the drawing unit (index into `UNITS`).
-    pub fn new(default_path: String, unit_index: usize) -> Self {
+    /// `unit_index` preselects the drawing unit (index into `UNITS`);
+    /// `layers` are the drawing's layers, `current` the current one.
+    pub fn new(default_path: String, unit_index: usize, layers: Vec<String>, current: Option<String>) -> Self {
+        let layers = attach_layer_options(&layers);
+        let layer_labels: Vec<String> = layers
+            .iter()
+            .map(|(n, new)| {
+                let mut l = n.clone();
+                if *new {
+                    l.push_str(tr!(" (nuovo, bianco)", " (new, white)"));
+                }
+                if current.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(n)) {
+                    l.push_str(tr!(" — corrente", " — current"));
+                }
+                l
+            })
+            .collect();
         let def = DialogDef::new(tr!("Inserisci immagine raster", "Insert raster image"))
             .with_control(DialogControl::FilePicker {
                 id: "file".into(),
@@ -1032,19 +1062,29 @@ impl AttachDialog {
                 &labels(UNITS),
                 unit_index.min(UNITS.len() - 1),
             ))
+            .with_control(DialogControl::Choice {
+                id: "layer".into(),
+                label: tr!("Layer", "Layer").into(),
+                options: layer_labels,
+                default_index: 0,
+            })
             .with_control(info(
                 tr!(
-                    "L'immagine viene inserita sul layer corrente, con l'angolo in basso a sinistra \
-                     nel punto indicato. Il file resta collegato (non viene copiato nel disegno).",
-                    "The image is inserted on the current layer, with its bottom-left corner \
-                     at the given point. The file stays linked (it is not copied into the drawing)."
+                    "L'immagine viene inserita sul layer scelto (RASTER viene creato se manca), \
+                     con l'angolo in basso a sinistra nel punto indicato. Il file resta collegato \
+                     (non viene copiato nel disegno). Il colore del layer serve a \"Colore \
+                     trasparente\" per colorare la mappa.",
+                    "The image is inserted on the chosen layer (RASTER is created if missing), \
+                     with its bottom-left corner at the given point. The file stays linked (it is \
+                     not copied into the drawing). \"Transparent colour\" can colour the map with \
+                     the layer's colour."
                 )
                 .into(),
             ))
             .submit_label(tr!("Inserisci", "Insert"))
             .cancel_label(tr!("Annulla", "Cancel"))
             .width(540.0);
-        AttachDialog { def, done: false }
+        AttachDialog { def, done: false, layers }
     }
 }
 
@@ -1070,6 +1110,9 @@ impl InteractiveCommand for AttachDialog {
             return CommandStep::Cancel;
         };
         commands::set_pending_path(path);
+        if let Some((name, create)) = self.layers.get(get_choice(&m, "layer")) {
+            commands::set_pending_layer(name.clone(), *create);
+        }
         let mode = ATTACH_MODES[get_choice(&m, "mode").min(ATTACH_MODES.len() - 1)].0;
         let unit = UNITS[get_choice(&m, "unit").min(UNITS.len() - 1)].0;
         deferred("RT_ATTACHPLACE", format!(
@@ -1278,9 +1321,14 @@ pub struct TranspDialog {
 impl TranspDialog {
     /// `lossy`: JPEG/WebP, whose colours are never perfectly even — a higher
     /// default tolerance.
-    pub fn new(handle: Handle, x: u32, y: u32, color: [u8; 3], lossy: bool) -> Self {
+    /// `layer` / `ink`: the image's layer and its colour, for the option
+    /// that colours the rest of the picture.
+    pub fn new(handle: Handle, x: u32, y: u32, color: [u8; 3], lossy: bool, layer: String, ink: [u8; 3]) -> Self {
         let hex = crate::pixels::hex_color(color);
+        let ink_hex = crate::pixels::hex_color(ink);
         let [r, g, b] = color;
+        // Colouring suits a scan on light paper; a photo keeps its colours.
+        let light = color.iter().all(|&c| c >= 200);
         let def = DialogDef::new(tr!("Colore trasparente", "Transparent colour"))
             .with_control(info(tr!(
                 format!("Colore scelto: {hex}  (R {r}, G {g}, B {b})"),
@@ -1307,12 +1355,25 @@ impl TranspDialog {
                 .into(),
                 default: false,
             })
+            .with_control(DialogControl::Checkbox {
+                id: "tint".into(),
+                label: tr!(
+                    format!("Colora il resto con il colore del layer {layer} ({ink_hex}), bordi sfumati"),
+                    format!("Colour the rest with layer {layer}'s colour ({ink_hex}), soft edges")
+                ),
+                default: light,
+            })
             .with_control(info(
                 tr!(
-                    "Viene creata una copia PNG accanto al file originale, che non viene modificato. \
-                     Per tornare indietro: Annulla (Ctrl+Z) oppure RT_TRANSPOFF.",
-                    "A PNG copy is created next to the original file, which is left unchanged. \
-                     To go back: Undo (Ctrl+Z) or RT_TRANSPOFF."
+                    "Colorare è adatto alle scansioni di mappe e disegni: le linee nere diventano del \
+                     colore del layer e risaltano sullo sfondo scuro (vale per tutta l'immagine, \
+                     anche con l'opzione dell'area). Viene creata una copia PNG accanto al file \
+                     originale, che non viene modificato. Per tornare indietro: Annulla (Ctrl+Z) \
+                     oppure RT_TRANSPOFF.",
+                    "Colouring suits scanned maps and drawings: black lines take the layer's colour \
+                     and stand out on the dark background (it applies to the whole image, even with \
+                     the area option). A PNG copy is created next to the original file, which is left \
+                     unchanged. To go back: Undo (Ctrl+Z) or RT_TRANSPOFF."
                 )
                 .into(),
             ))
@@ -1346,6 +1407,15 @@ impl InteractiveCommand for TranspDialog {
         };
         let tol = get_num(&m, "tol").unwrap_or(0.0).clamp(0.0, 100.0);
         let mode = if get_bool(&m, "area", false) { "AREA" } else { "ALL" };
-        CommandStep::Dispatch(format!("RT_TRANSPAPPLY {:X} {} {} {} {}", self.handle.value(), self.x, self.y, tol, mode))
+        let tint = if get_bool(&m, "tint", false) { " TINT" } else { "" };
+        CommandStep::Dispatch(format!(
+            "RT_TRANSPAPPLY {:X} {} {} {} {}{}",
+            self.handle.value(),
+            self.x,
+            self.y,
+            tol,
+            mode,
+            tint
+        ))
     }
 }

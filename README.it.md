@@ -13,7 +13,8 @@ Plugin per [Open CAD Studio](https://github.com/HakanSeven12/OpenCADStudio) che
 aggiunge la scheda **Raster** per lavorare sulle immagini GIF, JPG, PNG, BMP,
 TIFF e WebP nei disegni DWG/DXF:
 
-- **inserire** un'immagine nel disegno, dimensionandola a schermo, per larghezza,
+- **inserire** un'immagine nel disegno, sul layer scelto (di serie RASTER),
+  dimensionandola a schermo, per larghezza,
   a DPI o 1 pixel = 1 unità;
 - **ritagliare** un'immagine (tenere l'interno), fare un **foro** (nascondere
   l'interno) o **separare un pezzo** in una nuova immagine da spostare, con un
@@ -22,7 +23,8 @@ TIFF e WebP nei disegni DWG/DXF:
 - **ridimensionare** trascinando un angolo, oppure a larghezza / altezza /
   fattore di scala / **DPI** esatti;
 - rendere **trasparente un colore** (per esempio lo sfondo bianco di una
-  scansione), scelto con un clic sull'immagine;
+  scansione), scelto con un clic sull'immagine, e colorare il resto con il
+  colore del layer;
 - **cambiare il percorso su disco** del file dell'immagine e **ritrovare** in
   una cartella le immagini il cui file è stato spostato;
 - **elencare** le immagini con percorso, pixel, dimensioni e stato del file.
@@ -45,6 +47,7 @@ Il riferimento completo dei comandi è in [PLUGIN.it.md](PLUGIN.it.md).
 | portare una scansione in scala 1:1 | seleziona l'immagine → **Dimensioni / DPI** → modo *DPI*, 300, millimetri |
 | ingrandire a occhio | **Trascina**: angolo fisso, poi angolo opposto |
 | togliere lo sfondo bianco di una scansione | **Colore trasparente**, clic sull'immagine, clic sul bianco, *solo l'area collegata* |
+| rendere leggibile sullo schermo scuro una mappa nera su bianco | **Colore trasparente**, clic sul bianco, *colora il resto con il colore del layer* (layer RASTER: bianco) |
 | la foto è stata spostata su un altro disco | **Cerca in cartella** e scegli un file nella nuova cartella |
 | sostituire la foto con un'altra | seleziona l'immagine → **Cambia percorso** → scegli il file |
 

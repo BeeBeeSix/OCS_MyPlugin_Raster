@@ -12,7 +12,8 @@ A plugin for [Open CAD Studio](https://github.com/HakanSeven12/OpenCADStudio)
 that adds a **Raster** ribbon tab for GIF, JPG, PNG, BMP, TIFF and WebP images
 in DWG/DXF drawings:
 
-- **insert** an image, sized on screen, by width, by DPI or 1 pixel = 1 unit;
+- **insert** an image on a layer of your choice (RASTER by default), sized on
+  screen, by width, by DPI or 1 pixel = 1 unit;
 - **clip** an image (keep the inside), cut a **hole** (hide the inside) or
   **split a piece** off into a new image you can move — with a **rectangle**,
   a **polygon** drawn by clicks, or an existing **closed polyline**, circle or
@@ -20,7 +21,7 @@ in DWG/DXF drawings:
 - **resize** by dragging a corner, or to an exact width / height / scale
   factor / **DPI**;
 - make **one colour transparent** (e.g. a scan's white background), picked
-  with a click on the image;
+  with a click on the image, and colour the rest with the layer's colour;
 - **change the file path** on disk and **find** images whose file was moved;
 - **list** every image with its path, pixels, size and file status.
 
@@ -42,6 +43,7 @@ Full command reference: [PLUGIN.md](PLUGIN.md).
 | bring a scan to 1:1 scale | select the image → **Size / DPI** → *DPI* mode, 300, millimetres |
 | enlarge by eye | **Drag**: fixed corner, then opposite corner |
 | drop a scan's white background | **Transparent colour**, click the image, click the white, *only the connected area* |
+| a black-on-white map readable on the dark screen | **Transparent colour**, click the white, *colour the rest with the layer's colour* (RASTER layer: white) |
 | the photo was moved to another drive | **Find in folder** and pick a file in the new folder |
 | replace the photo with another | select the image → **Change path** → pick the file |
 

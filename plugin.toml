@@ -1,7 +1,7 @@
 [plugin]
 id = "opencad.rastertools"
 name = "Raster Tools"
-version = "0.6.2"
+version = "0.7.0"
 description = "Raster images (GIF, JPG, PNG, BMP, TIFF, WebP): insert, clip with a rectangle, polygon or polyline, cut holes and split pieces, resize on screen or by size/DPI, change the file path and find moved files. English and Italian."
 author = "Macchecaspita"
 license = "GPL-3.0-only"

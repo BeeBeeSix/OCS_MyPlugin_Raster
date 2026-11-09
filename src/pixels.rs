@@ -112,6 +112,39 @@ pub fn make_transparent(img: &mut Rgba, key: [u8; 3], tol: u8, contiguous: Optio
     changed
 }
 
+/// Recolour a scan for the CAD's dark background: the background colour
+/// `key` (within `tol`) disappears and everything else takes the colour
+/// `ink`, its opacity growing with its distance from `key`. The grey edge of
+/// a line (anti-aliasing, JPEG noise) becomes a half-transparent edge in the
+/// ink colour instead of a pale halo, so lines stay clean when the CAD
+/// shrinks or enlarges the picture. Distances are measured against the
+/// farthest colour in the picture (the darkest ink on a white scan); ink
+/// reaches full strength at 70% of that distance. Transparent pixels get the
+/// ink colour too, so resampling never mixes the old background back in.
+/// Returns how many pixels end up fully transparent.
+pub fn tint_soft(img: &mut Rgba, key: [u8; 3], tol: u8, ink: [u8; 3]) -> usize {
+    let dist = |p: &[u8]| p[0].abs_diff(key[0]).max(p[1].abs_diff(key[1])).max(p[2].abs_diff(key[2]));
+    let dmax = img.px.chunks_exact(4).filter(|p| p[3] != 0).map(dist).max().unwrap_or(0);
+    let span = (dmax as f64 - tol as f64).max(1.0);
+    let mut clear = 0;
+    for p in img.px.chunks_exact_mut(4) {
+        let a = if p[3] == 0 {
+            0
+        } else {
+            let t = ((dist(p) as f64 - tol as f64) / span).clamp(0.0, 1.0);
+            ((t / 0.7).min(1.0) * p[3] as f64).round() as u8
+        };
+        p[0] = ink[0];
+        p[1] = ink[1];
+        p[2] = ink[2];
+        p[3] = a;
+        if a == 0 {
+            clear += 1;
+        }
+    }
+    clear
+}
+
 /// `#RRGGBB`.
 pub fn hex_color(c: [u8; 3]) -> String {
     format!("#{:02X}{:02X}{:02X}", c[0], c[1], c[2])
@@ -211,6 +244,27 @@ mod tests {
         assert_eq!(n, 3);
         // seed on a non-matching pixel does nothing
         assert_eq!(make_transparent(&mut img, [255, 255, 255], 0, Some((1, 1))), 0);
+    }
+
+    #[test]
+    fn tint_for_dark_background() {
+        // white paper, a black line, a grey edge pixel and light JPEG noise
+        let mut buf = vec![
+            255, 255, 255, 255, /**/ 0, 0, 0, 255, /**/ 128, 128, 128, 255, /**/ 245, 250, 247, 255,
+        ];
+        let mut img = Rgba { w: 4, h: 1, px: &mut buf };
+        let clear = tint_soft(&mut img, [255, 255, 255], 26, [255, 255, 255]);
+        assert_eq!(clear, 2); // paper and noise
+        assert_eq!(img.get(1, 0), [255, 255, 255, 255]); // the line, full strength
+        let edge = img.get(2, 0)[3];
+        assert!(edge > 100 && edge < 255, "{edge}"); // edge half transparent
+        assert_eq!(img.get(0, 0), [255, 255, 255, 0]);
+        // a red ink colour
+        let mut buf = vec![255, 255, 255, 255, 0, 0, 0, 255];
+        let mut img = Rgba { w: 2, h: 1, px: &mut buf };
+        tint_soft(&mut img, [255, 255, 255], 0, [255, 0, 0]);
+        assert_eq!(img.get(1, 0), [255, 0, 0, 255]);
+        assert_eq!(img.get(0, 0), [255, 0, 0, 0]);
     }
 
     #[test]

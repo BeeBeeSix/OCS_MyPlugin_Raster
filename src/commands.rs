@@ -38,6 +38,36 @@ fn take_pending_path() -> Option<String> {
     PENDING_PATH.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
+/// The layer chosen in the RT_ATTACH dialog (names may hold spaces, so they
+/// do not travel through the command line), and whether to create it.
+static PENDING_LAYER: Mutex<Option<(String, bool)>> = Mutex::new(None);
+
+pub fn set_pending_layer(name: String, create: bool) {
+    *PENDING_LAYER.lock().unwrap_or_else(|e| e.into_inner()) = Some((name, create));
+}
+
+fn take_pending_layer() -> Option<(String, bool)> {
+    PENDING_LAYER.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// Layer suggested for raster images.
+pub const RASTER_LAYER: &str = "RASTER";
+
+/// The drawing's layer names, in table order.
+fn layer_names(host: &dyn HostApi) -> Vec<String> {
+    host.document().layers.iter().map(|l| l.name.clone()).collect()
+}
+
+/// The RGB colour of a layer (white when unknown — ACI 7 on a dark screen).
+pub(crate) fn layer_rgb(host: &dyn HostApi, layer: &str) -> [u8; 3] {
+    host.document()
+        .layers
+        .get(layer)
+        .and_then(|l| l.color.rgb())
+        .map(|(r, g, b)| [r, g, b])
+        .unwrap_or([255, 255, 255])
+}
+
 /// A clip polygon drawn or picked by a tool, waiting for `RT_CLIPPOLYAPPLY`
 /// (a polyline with arcs can have hundreds of vertices — too long for a
 /// command line).
@@ -325,7 +355,17 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
 
         "RT_ATTACH" => {
             let unit = drawing_unit_index(host);
-            host.start_interactive(Box::new(tools::AttachDialog::new(rest.trim_matches('"').to_string(), unit)));
+            let layers = layer_names(host);
+            let current = match host.system_variable("CLAYER") {
+                Some(HostSettingValue::Text(l)) if !l.trim().is_empty() => Some(l),
+                _ => None,
+            };
+            host.start_interactive(Box::new(tools::AttachDialog::new(
+                rest.trim_matches('"').to_string(),
+                unit,
+                layers,
+                current,
+            )));
         }
         "RT_ATTACHPLACE" => {
             if !args.is_empty() {
@@ -759,12 +799,37 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
     let mut img = RasterImage::new(&path, Vector3::new(v[0], v[1], v[2]), w as f64, h as f64);
     img.u_vector = Vector3::new(px, 0.0, 0.0);
     img.v_vector = Vector3::new(0.0, px, 0.0);
-    if let Some(HostSettingValue::Text(layer)) = host.system_variable("CLAYER") {
-        if !layer.trim().is_empty() {
-            img.common.layer = layer;
+    host.begin_undo_group("RT_ATTACH");
+    let mut created = false;
+    let mut assigned = false;
+    if let Some((name, create)) = take_pending_layer() {
+        let exists = host.document().layers.get(&name).is_some();
+        if create && !exists {
+            let config = ocs_plugin_api::host::LayerConfig {
+                name: name.clone(),
+                color: Some(codec::types::Color::Index(7)),
+                ..Default::default()
+            };
+            created = host.add_layer(config).is_some();
+            if !created {
+                host.push_error(&tr!(
+                    format!("RT_ATTACH: impossibile creare il layer \"{name}\"; l'immagine va sul layer corrente."),
+                    format!("RT_ATTACH: cannot create layer \"{name}\"; the image goes on the current layer.")
+                ));
+            }
+        }
+        if exists || created {
+            img.common.layer = name;
+            assigned = true;
         }
     }
-    host.begin_undo_group("RT_ATTACH");
+    if !assigned {
+        if let Some(HostSettingValue::Text(layer)) = host.system_variable("CLAYER") {
+            if !layer.trim().is_empty() {
+                img.common.layer = layer;
+            }
+        }
+    }
     let handle = host.add_entity(EntityType::RasterImage(img));
     host.end_undo_group();
     if handle.is_null() {
@@ -778,9 +843,15 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
     host.set_dirty();
     let _ = host.set_selection(&[handle]);
     let (name, ww, hh) = (file_name_only(&path), fmt_len(w as f64 * px), fmt_len(h as f64 * px));
+    let layer = host
+        .document()
+        .get_entity(handle)
+        .map(|e| e.common().layer.clone())
+        .filter(|l| !l.is_empty())
+        .unwrap_or_else(|| "0".into());
     host.push_info(&tr!(
-        format!("RT_ATTACH: inserita {name} ({w}×{h} px, {ww} × {hh} unità)."),
-        format!("RT_ATTACH: inserted {name} ({w}×{h} px, {ww} × {hh} units).")
+        format!("RT_ATTACH: inserita {name} ({w}×{h} px, {ww} × {hh} unità) sul layer {layer}{new}.", new = if created { " (creato)" } else { "" }),
+        format!("RT_ATTACH: inserted {name} ({w}×{h} px, {ww} × {hh} units) on layer {layer}{new}.", new = if created { " (new)" } else { "" })
     ));
 }
 
@@ -925,16 +996,19 @@ fn transp_pick(host: &mut dyn HostApi, args: &[&str]) {
         path.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref(),
         Some("jpg" | "jpeg" | "jpe" | "webp")
     );
-    crate::diag::log(&format!("  pixel ({x},{y}) = {c:?}; opening the dialog"));
-    host.start_interactive(Box::new(tools::TranspDialog::new(h, x, y, [c[0], c[1], c[2]], lossy)));
+    let layer = if img.common.layer.is_empty() { "0".to_string() } else { img.common.layer.clone() };
+    let ink = layer_rgb(host, &layer);
+    crate::diag::log(&format!("  pixel ({x},{y}) = {c:?}; layer {layer} {ink:?}; opening the dialog"));
+    host.start_interactive(Box::new(tools::TranspDialog::new(h, x, y, [c[0], c[1], c[2]], lossy, layer, ink)));
 }
 
-/// `RT_TRANSPAPPLY <handle> <x> <y> <tolerance_%> ALL|AREA` — file pixel
-/// coordinates of the chosen colour.
+/// `RT_TRANSPAPPLY <handle> <x> <y> <tolerance_%> ALL|AREA [TINT]` — file
+/// pixel coordinates of the chosen colour. `TINT`: everything else takes the
+/// colour of the image's layer, with soft edges (`pixels::tint_soft`).
 fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
     let usage = tr!(
-        "Uso: RT_TRANSPAPPLY <handle> <x> <y> <tolleranza_%> ALL|AREA",
-        "Usage: RT_TRANSPAPPLY <handle> <x> <y> <tolerance_%> ALL|AREA"
+        "Uso: RT_TRANSPAPPLY <handle> <x> <y> <tolleranza_%> ALL|AREA [TINT]",
+        "Usage: RT_TRANSPAPPLY <handle> <x> <y> <tolerance_%> ALL|AREA [TINT]"
     );
     let h = args.first().and_then(|t| parse_handle(t));
     let (x, y, tol) = (num(args.get(1).copied()), num(args.get(2).copied()), num(args.get(3).copied()));
@@ -943,8 +1017,11 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
         return;
     };
     let area = args.get(4).is_some_and(|m| m.eq_ignore_ascii_case("AREA"));
+    let tint = args.get(5).is_some_and(|m| m.eq_ignore_ascii_case("TINT"));
     crate::diag::log(&format!("RT_TRANSPAPPLY {args:?}"));
-    let Some((_img, path)) = transp_source(host, h) else { return };
+    let Some((img, path)) = transp_source(host, h) else { return };
+    let layer = if img.common.layer.is_empty() { "0".to_string() } else { img.common.layer.clone() };
+    let ink = layer_rgb(host, &layer);
     let big = |w: u32, h: u32| w as u64 * h as u64 >= 8_000_000;
     let Some((w, hh, mut px)) = decode_or_report(host, &path, false) else { return };
     if x < 0.0 || y < 0.0 || x >= w as f64 || y >= hh as f64 {
@@ -955,8 +1032,12 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
     let mut pic = crate::pixels::Rgba { w, h: hh, px: &mut px };
     let c = pic.get(x, y);
     let key = [c[0], c[1], c[2]];
-    let changed =
-        crate::pixels::make_transparent(&mut pic, key, crate::pixels::tol_from_percent(tol), area.then_some((x, y)));
+    let tol8 = crate::pixels::tol_from_percent(tol);
+    let changed = if tint {
+        crate::pixels::tint_soft(&mut pic, key, tol8, ink)
+    } else {
+        crate::pixels::make_transparent(&mut pic, key, tol8, area.then_some((x, y)))
+    };
     crate::diag::log(&format!("  {w}x{hh}: {changed} pixels close to {key:?}"));
     if changed == 0 {
         host.push_info(tr!(
@@ -998,6 +1079,22 @@ fn transp_apply(host: &mut dyn HostApi, args: &[&str]) {
     crate::diag::log(&format!("  relinked {done} image(s)"));
     let pct = changed as f64 * 100.0 / (w as f64 * hh as f64);
     let (hex, name) = (crate::pixels::hex_color(key), file_name_only(&out_s).to_string());
+    if tint {
+        let ink_hex = crate::pixels::hex_color(ink);
+        host.push_info(&tr!(
+            format!(
+                "RT_TRANSP: colore {hex} reso trasparente ({changed} pixel, {pct:.1}%), il resto colorato \
+                 come il layer {layer} ({ink_hex}), su {done} immagine/i. Copia salvata: {name} \
+                 (l'originale non è stato modificato)."
+            ),
+            format!(
+                "RT_TRANSP: colour {hex} made transparent ({changed} pixels, {pct:.1}%), the rest coloured \
+                 like layer {layer} ({ink_hex}), on {done} image(s). Copy saved: {name} \
+                 (the original is unchanged)."
+            )
+        ));
+        return;
+    }
     host.push_info(&tr!(
         format!(
             "RT_TRANSP: colore {hex} reso trasparente ({changed} pixel, {pct:.1}%) su {done} immagine/i. \
