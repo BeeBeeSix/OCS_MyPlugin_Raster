@@ -23,6 +23,7 @@ pub mod i18n;
 pub mod commands;
 pub mod diag;
 pub mod geom;
+pub mod pdf;
 pub mod imgsize;
 pub mod pixels;
 mod ribbon;

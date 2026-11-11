@@ -13,9 +13,11 @@ Plugin per [Open CAD Studio](https://github.com/HakanSeven12/OpenCADStudio) che
 aggiunge la scheda **Raster** per lavorare sulle immagini GIF, JPG, PNG, BMP,
 TIFF e WebP nei disegni DWG/DXF:
 
-- **inserire** un'immagine nel disegno, sul layer scelto (di serie RASTER),
-  dimensionandola a schermo, per larghezza,
-  a DPI o 1 pixel = 1 unità;
+- **inserire** un'immagine — o l'immagine contenuta nel **PDF** di un estratto di
+  mappa — sul layer scelto (di serie RASTER), dietro al disegno, dimensionandola
+  a schermo, per larghezza, a DPI con la **scala della mappa** o 1 pixel = 1 unità;
+- **georeferenziarla** con **due punti** (sposta, ruota e scala in un colpo),
+  **ruotarla**, portarla **dietro** al disegno;
 - **ritagliare** un'immagine (tenere l'interno), fare un **foro** (nascondere
   l'interno) o **separare un pezzo** in una nuova immagine da spostare, con un
   **rettangolo**, un **poligono** disegnato a clic o una **polilinea chiusa**,
@@ -32,7 +34,8 @@ TIFF e WebP nei disegni DWG/DXF:
 L'interfaccia è in **inglese**, oppure in **italiano** quando Open CAD Studio è in
 italiano. `RT_LANG IT|EN|AUTO` forza una lingua.
 
-Il riferimento completo dei comandi è in [PLUGIN.it.md](PLUGIN.it.md).
+Il riferimento completo dei comandi è in [PLUGIN.it.md](PLUGIN.it.md). Nel CAD, il
+pulsante **Guida** della scheda Raster mostra una breve guida.
 
 ## Uso rapido
 
@@ -47,6 +50,8 @@ Il riferimento completo dei comandi è in [PLUGIN.it.md](PLUGIN.it.md).
 | portare una scansione in scala 1:1 | seleziona l'immagine → **Dimensioni / DPI** → modo *DPI*, 300, millimetri |
 | ingrandire a occhio | **Trascina**: angolo fisso, poi angolo opposto |
 | togliere lo sfondo bianco di una scansione | **Colore trasparente**, clic sull'immagine, clic sul bianco, *solo l'area collegata* |
+| portare un estratto di mappa PDF in dimensioni reali | **Inserisci immagine**, scegli il PDF, *DPI* 300, scala 1:2000, metri |
+| sovrapporre una scansione al rilievo | **Allinea 2 punti**: due punti sulla scansione, ognuno seguito dalla sua posizione vera |
 | rendere leggibile sullo schermo scuro una mappa nera su bianco | **Colore trasparente**, clic sul bianco, *colora il resto con il colore del layer* (layer RASTER: bianco) |
 | la foto è stata spostata su un altro disco | **Cerca in cartella** e scegli un file nella nuova cartella |
 | sostituire la foto con un'altra | seleziona l'immagine → **Cambia percorso** → scegli il file |
@@ -114,6 +119,7 @@ src/commands.rs  comandi RT_* e modifiche al disegno
 src/tools.rs     strumenti interattivi (selezione, rettangolo, trascinamento) e finestre
 src/geom.rs      geometria pura: pixel ↔ disegno, ritaglio, scala (con test)
 src/imgsize.rs   dimensioni in pixel dall'intestazione del file (con test)
+src/pdf.rs       immagine contenuta in una pagina PDF (con test)
 src/pixels.rs    colore trasparente sui pixel RGBA (con test)
 scripts/release.ps1  pubblicazione di una nuova versione
 CHANGELOG.md     registro delle modifiche

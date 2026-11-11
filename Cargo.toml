@@ -1,6 +1,6 @@
 [package]
 name = "opencad-raster-plugin"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 description = "Raster Tools add-on for Open CAD Studio — rectangular clip / hole / split, resize (drag, size, DPI), relink and find moved GIF/JPG/PNG/BMP/TIFF/WebP images."
 license = "GPL-3.0-only"

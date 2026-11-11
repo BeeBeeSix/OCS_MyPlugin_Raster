@@ -1047,15 +1047,23 @@ impl AttachDialog {
         let def = DialogDef::new(tr!("Inserisci immagine raster", "Insert raster image"))
             .with_control(DialogControl::FilePicker {
                 id: "file".into(),
-                label: tr!("File immagine", "Image file").into(),
+                label: tr!("File immagine (anche PDF di una mappa)", "Image file (or a map PDF)").into(),
                 default_path,
-                filter_name: tr!("Immagini raster", "Raster images").into(),
-                extensions: EXTENSIONS.iter().map(|e| e.to_string()).collect(),
+                filter_name: tr!("Immagini raster e PDF", "Raster images and PDF").into(),
+                extensions: EXTENSIONS.iter().map(|e| e.to_string()).chain(["pdf".to_string()]).collect(),
                 save: false,
             })
             .with_control(choice("mode", tr!("Dimensione", "Size"), &labels(ATTACH_MODES), 0))
             .with_control(number("width", tr!("Larghezza (unità di disegno)", "Width (drawing units)"), 100.0))
             .with_control(number("dpi", "DPI", 300.0))
+            .with_control(DialogControl::Number {
+                id: "mapscale".into(),
+                label: tr!("Scala della mappa 1: (per DPI; 1 = carta)", "Map scale 1: (for DPI; 1 = paper)").into(),
+                default: 1.0,
+                min: Some(1.0),
+                max: None,
+                step: Some(500.0),
+            })
             .with_control(choice(
                 "unit",
                 tr!("Unità del disegno (per DPI)", "Drawing units (for DPI)"),
@@ -1070,14 +1078,15 @@ impl AttachDialog {
             })
             .with_control(info(
                 tr!(
-                    "L'immagine viene inserita sul layer scelto (RASTER viene creato se manca), \
-                     con l'angolo in basso a sinistra nel punto indicato. Il file resta collegato \
-                     (non viene copiato nel disegno). Il colore del layer serve a \"Colore \
-                     trasparente\" per colorare la mappa.",
-                    "The image is inserted on the chosen layer (RASTER is created if missing), \
-                     with its bottom-left corner at the given point. The file stays linked (it is \
-                     not copied into the drawing). \"Transparent colour\" can colour the map with \
-                     the layer's colour."
+                    "L'immagine va sul layer scelto (RASTER viene creato se manca) e dietro al \
+                     disegno, con l'angolo in basso a sinistra nel punto indicato. Il file resta \
+                     collegato. Con un PDF (es. estratto di mappa) l'immagine contenuta viene \
+                     salvata accanto come <nome>_pdf.png. Mappa catastale da PDF a 300 DPI, \
+                     scala 1:2000, unità metri: dimensioni reali.",
+                    "The image goes on the chosen layer (RASTER is created if missing) and behind \
+                     the drawing, with its bottom-left corner at the given point. The file stays \
+                     linked. With a PDF (e.g. a map extract) its picture is saved next to it as \
+                     <name>_pdf.png. A map PDF at 300 DPI, scale 1:2000, metres: real size."
                 )
                 .into(),
             ))
@@ -1116,11 +1125,12 @@ impl InteractiveCommand for AttachDialog {
         let mode = ATTACH_MODES[get_choice(&m, "mode").min(ATTACH_MODES.len() - 1)].0;
         let unit = UNITS[get_choice(&m, "unit").min(UNITS.len() - 1)].0;
         deferred("RT_ATTACHPLACE", format!(
-            "{} {} {} {}",
+            "{} {} {} {} {}",
             mode,
             get_num(&m, "width").unwrap_or(0.0),
             get_num(&m, "dpi").unwrap_or(0.0),
-            unit
+            unit,
+            get_num(&m, "mapscale").filter(|k| *k > 0.0).unwrap_or(1.0)
         ))
     }
 }
@@ -1417,5 +1427,457 @@ impl InteractiveCommand for TranspDialog {
             mode,
             tint
         ))
+    }
+}
+
+// ── Two-point alignment (georeferencing) ────────────────────────────────────
+
+/// Pick an image, then a point on it and where it must go, then a second
+/// pair: the image moves, turns and scales so both points land in place.
+/// Enter after the first pair moves it only.
+pub struct AlignTool {
+    images: Vec<Snapshot>,
+    target: Option<usize>,
+    /// p1, q1, p2 so far (world).
+    pts: Vec<P3>,
+    msg: Option<String>,
+}
+
+impl AlignTool {
+    pub fn new(images: Vec<Snapshot>, preselected: Option<Handle>) -> Self {
+        let target = preselected.and_then(|h| index_of(&images, h));
+        AlignTool { images, target, pts: Vec::new(), msg: None }
+    }
+
+    fn mark(&self, t: usize, p: P3) -> PreviewWire {
+        let (fw, fh) = self.images[t].frame.world_size();
+        PreviewWire::circle(p, (fw.hypot(fh) * 0.01).max(1e-9), Some(ORANGE))
+    }
+
+    fn preview_frame(&self, t: usize, s: &geom::Similarity) -> PreviewWire {
+        let snap = &self.images[t];
+        let f = s.frame(&snap.frame);
+        PreviewWire::with_color(ring(snap.visible.iter().map(|&p| f.to_world(p)).collect()), ORANGE)
+    }
+
+    fn apply_line(&self, t: usize, pts: &[P3]) -> String {
+        let mut line = format!("RT_ALIGNAPPLY {:X}", self.images[t].handle.value());
+        for p in pts {
+            line.push_str(&format!(" {} {}", p[0], p[1]));
+        }
+        line
+    }
+}
+
+impl InteractiveCommand for AlignTool {
+    fn prompt(&self) -> String {
+        let p = match (self.target, self.pts.len()) {
+            (None, _) => tr!("RT_ALIGN: seleziona l'immagine", "RT_ALIGN: select the image"),
+            (Some(_), 0) => tr!(
+                "RT_ALIGN: 1° punto sull'immagine (un punto riconoscibile, es. uno spigolo)",
+                "RT_ALIGN: 1st point on the image (a recognisable point, e.g. a corner)"
+            ),
+            (Some(_), 1) => tr!("RT_ALIGN: dove deve andare il 1° punto", "RT_ALIGN: where the 1st point must go"),
+            (Some(_), 2) => tr!(
+                "RT_ALIGN: 2° punto sull'immagine, lontano dal primo  (Invio = solo spostamento)",
+                "RT_ALIGN: 2nd point on the image, far from the first  (Enter = move only)"
+            ),
+            _ => tr!("RT_ALIGN: dove deve andare il 2° punto", "RT_ALIGN: where the 2nd point must go"),
+        };
+        with_msg(&self.msg, p.to_string())
+    }
+
+    fn on_point(&mut self, pt: [f64; 3]) -> CommandStep {
+        let Some(t) = self.target else {
+            match hit(&self.images, pt) {
+                Some(i) => {
+                    self.target = Some(i);
+                    self.msg = None;
+                }
+                None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
+            }
+            return CommandStep::NeedPoint;
+        };
+        if self.pts.len() == 2 && geom::len3([pt[0] - self.pts[0][0], pt[1] - self.pts[0][1], 0.0]) < 1e-9 {
+            self.msg = Some(tr!("il 2° punto deve essere diverso dal 1°", "the 2nd point must differ from the 1st").into());
+            return CommandStep::NeedPoint;
+        }
+        self.msg = None;
+        self.pts.push(pt);
+        if self.pts.len() < 4 {
+            return CommandStep::NeedPoint;
+        }
+        CommandStep::Dispatch(self.apply_line(t, &self.pts))
+    }
+
+    fn on_enter(&mut self) -> CommandStep {
+        match (self.target, self.pts.len()) {
+            (Some(t), 2) => CommandStep::Dispatch(self.apply_line(t, &self.pts)),
+            _ => CommandStep::Cancel,
+        }
+    }
+
+    fn needs_object_pick(&self) -> bool {
+        self.target.is_none()
+    }
+
+    fn on_object_pick(&mut self, handle: Handle, pt: [f64; 3]) -> CommandStep {
+        match index_of(&self.images, handle).or_else(|| hit(&self.images, pt)) {
+            Some(i) => {
+                self.target = Some(i);
+                self.msg = None;
+            }
+            None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
+        }
+        CommandStep::NeedPoint
+    }
+
+    fn on_cursor_move(&mut self, pt: [f64; 3]) -> Vec<PreviewWire> {
+        let Some(t) = self.target else {
+            return hit(&self.images, pt)
+                .map(|i| vec![PreviewWire::with_color(self.images[i].outline(), CYAN)])
+                .unwrap_or_default();
+        };
+        let mut out = vec![PreviewWire::with_color(self.images[t].visible_outline(), GREY)];
+        for p in &self.pts {
+            out.push(self.mark(t, *p));
+        }
+        match self.pts.len() {
+            0 => out.push(self.mark(t, pt)),
+            1 => {
+                let p1 = self.pts[0];
+                out.push(PreviewWire::line(p1, pt, Some(ORANGE)));
+                out.push(self.preview_frame(t, &geom::Similarity::translation([pt[0] - p1[0], pt[1] - p1[1]])));
+            }
+            2 => {
+                let (p1, q1) = (self.pts[0], self.pts[1]);
+                out.push(PreviewWire::line(p1, q1, Some(ORANGE)));
+                out.push(self.preview_frame(t, &geom::Similarity::translation([q1[0] - p1[0], q1[1] - p1[1]])));
+                out.push(self.mark(t, pt));
+            }
+            _ => {
+                let (p1, q1, p2) = (self.pts[0], self.pts[1], self.pts[2]);
+                out.push(PreviewWire::line(p1, q1, Some(ORANGE)));
+                out.push(PreviewWire::line(p2, pt, Some(ORANGE)));
+                if let Some(s) = geom::Similarity::from_pairs([p1[0], p1[1]], [q1[0], q1[1]], [p2[0], p2[1]], [pt[0], pt[1]]) {
+                    out.push(self.preview_frame(t, &s));
+                }
+            }
+        }
+        out
+    }
+}
+
+// ── Rotation ────────────────────────────────────────────────────────────────
+
+/// Pick an image, a pivot, then a reference direction and the direction it
+/// must take (aligns the image to a line). Enter instead of the reference
+/// point asks for an exact angle.
+pub struct RotateTool {
+    images: Vec<Snapshot>,
+    target: Option<usize>,
+    base: Option<P3>,
+    reference: Option<(P3, f64)>,
+    msg: Option<String>,
+}
+
+impl RotateTool {
+    pub fn new(images: Vec<Snapshot>, preselected: Option<Handle>) -> Self {
+        let target = preselected.and_then(|h| index_of(&images, h));
+        RotateTool { images, target, base: None, reference: None, msg: None }
+    }
+
+    fn centre(&self, t: usize) -> P3 {
+        let (px, _) = self.images[t].visible_corners();
+        self.images[t].frame.to_world([(px[0][0] + px[2][0]) / 2.0, (px[0][1] + px[2][1]) / 2.0])
+    }
+}
+
+impl InteractiveCommand for RotateTool {
+    fn prompt(&self) -> String {
+        let p = match (self.target, self.base, self.reference) {
+            (None, ..) => tr!("RT_ROTATE: seleziona l'immagine", "RT_ROTATE: select the image"),
+            (Some(_), None, _) => tr!(
+                "RT_ROTATE: punto base (centro di rotazione)  (Invio = centro dell'immagine, angolo esatto)",
+                "RT_ROTATE: base point (centre of rotation)  (Enter = image centre, exact angle)"
+            ),
+            (Some(_), Some(_), None) => tr!(
+                "RT_ROTATE: punto di riferimento sull'immagine (es. lungo una linea)  (Invio = angolo esatto)",
+                "RT_ROTATE: reference point on the image (e.g. along a line)  (Enter = exact angle)"
+            ),
+            _ => tr!("RT_ROTATE: nuova direzione del riferimento", "RT_ROTATE: new direction of the reference"),
+        };
+        with_msg(&self.msg, p.to_string())
+    }
+
+    fn on_point(&mut self, pt: [f64; 3]) -> CommandStep {
+        let Some(t) = self.target else {
+            match hit(&self.images, pt) {
+                Some(i) => {
+                    self.target = Some(i);
+                    self.msg = None;
+                }
+                None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
+            }
+            return CommandStep::NeedPoint;
+        };
+        let Some(base) = self.base else {
+            self.base = Some(pt);
+            return CommandStep::NeedPoint;
+        };
+        let Some(dir) = geom::direction(base, pt) else {
+            self.msg = Some(tr!("scegli un punto diverso dal punto base", "pick a point other than the base point").into());
+            return CommandStep::NeedPoint;
+        };
+        self.msg = None;
+        let Some((_, from)) = self.reference else {
+            self.reference = Some((pt, dir));
+            return CommandStep::NeedPoint;
+        };
+        CommandStep::Dispatch(format!(
+            "RT_ROTATEAPPLY {:X} {} {} {}",
+            self.images[t].handle.value(),
+            (dir - from).to_degrees(),
+            base[0],
+            base[1]
+        ))
+    }
+
+    fn on_enter(&mut self) -> CommandStep {
+        let Some(t) = self.target else { return CommandStep::Cancel };
+        if self.reference.is_some() {
+            return CommandStep::Cancel;
+        }
+        let c = self.base.unwrap_or_else(|| self.centre(t));
+        deferred("RT_ROTATEDLG", format!("{:X} {} {}", self.images[t].handle.value(), c[0], c[1]))
+    }
+
+    fn needs_object_pick(&self) -> bool {
+        self.target.is_none()
+    }
+
+    fn on_object_pick(&mut self, handle: Handle, pt: [f64; 3]) -> CommandStep {
+        match index_of(&self.images, handle).or_else(|| hit(&self.images, pt)) {
+            Some(i) => {
+                self.target = Some(i);
+                self.msg = None;
+            }
+            None => self.msg = Some(tr!("non è un'immagine raster", "not a raster image").into()),
+        }
+        CommandStep::NeedPoint
+    }
+
+    fn on_cursor_move(&mut self, pt: [f64; 3]) -> Vec<PreviewWire> {
+        let Some(t) = self.target else {
+            return hit(&self.images, pt)
+                .map(|i| vec![PreviewWire::with_color(self.images[i].outline(), CYAN)])
+                .unwrap_or_default();
+        };
+        let snap = &self.images[t];
+        let mut out = vec![PreviewWire::with_color(snap.visible_outline(), GREY)];
+        let Some(base) = self.base else { return out };
+        let (fw, fh) = snap.frame.world_size();
+        out.push(PreviewWire::circle(base, (fw.hypot(fh) * 0.01).max(1e-9), Some(ORANGE)));
+        match self.reference {
+            None => out.push(PreviewWire::line(base, pt, Some(GREY))),
+            Some((rp, from)) => {
+                out.push(PreviewWire::line(base, rp, Some(GREY)));
+                out.push(PreviewWire::line(base, pt, Some(ORANGE)));
+                if let Some(dir) = geom::direction(base, pt) {
+                    let r = geom::Similarity::rotation([base[0], base[1]], dir - from);
+                    let f = r.frame(&snap.frame);
+                    out.push(PreviewWire::with_color(ring(snap.visible.iter().map(|&p| f.to_world(p)).collect()), ORANGE));
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Exact rotation angle around a given point.
+pub struct RotateDialog {
+    handle: Handle,
+    centre: P2,
+    def: DialogDef,
+    done: bool,
+}
+
+impl RotateDialog {
+    pub fn new(handle: Handle, centre: P2) -> Self {
+        let def = DialogDef::new(tr!("Ruota immagine", "Rotate image"))
+            .with_control(DialogControl::Number {
+                id: "angle".into(),
+                label: tr!("Angolo in gradi (positivo = antiorario)", "Angle in degrees (positive = counter-clockwise)").into(),
+                default: 0.0,
+                min: Some(-360.0),
+                max: Some(360.0),
+                step: Some(1.0),
+            })
+            .with_control(info(
+                tr!(
+                    format!("Centro di rotazione: {:.3}, {:.3}.", centre[0], centre[1]),
+                    format!("Centre of rotation: {:.3}, {:.3}.", centre[0], centre[1])
+                ),
+            ))
+            .submit_label(tr!("Ruota", "Rotate"));
+        RotateDialog { handle, centre, def, done: false }
+    }
+}
+
+impl InteractiveCommand for RotateDialog {
+    fn prompt(&self) -> String {
+        tr!("RT_ROTATE: angolo nella finestra", "RT_ROTATE: angle in the dialog").into()
+    }
+    fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+        CommandStep::NeedPoint
+    }
+    fn on_enter(&mut self) -> CommandStep {
+        CommandStep::Cancel
+    }
+    fn modal_dialog(&self) -> Option<DialogDef> {
+        (!self.done).then(|| self.def.clone())
+    }
+    fn on_dialog_response(&mut self, response: DialogResponse) -> CommandStep {
+        self.done = true;
+        let DialogResponse::Submitted(m) = response else {
+            return CommandStep::Cancel;
+        };
+        let angle = get_num(&m, "angle").unwrap_or(0.0);
+        if angle.abs() < 1e-12 {
+            return CommandStep::Cancel;
+        }
+        CommandStep::Dispatch(format!("RT_ROTATEAPPLY {:X} {} {} {}", self.handle.value(), angle, self.centre[0], self.centre[1]))
+    }
+}
+
+// ── RT_PURGE confirmation ───────────────────────────────────────────────────
+
+pub struct PurgeDialog {
+    def: DialogDef,
+    done: bool,
+}
+
+impl PurgeDialog {
+    pub fn new(paths: Vec<String>) -> Self {
+        let n = paths.len();
+        let mut list: Vec<String> = paths.iter().take(12).map(|p| format!("• {}", commands::file_name_only(p))).collect();
+        if n > 12 {
+            list.push(tr!(format!("… e altre {}", n - 12), format!("… and {} more", n - 12)));
+        }
+        let def = DialogDef::new(tr!("Pulisci le copie trasparenti", "Clean up transparent copies"))
+            .with_control(info(tr!(
+                format!("{n} copie create da \"Colore trasparente\" non sono usate da nessuna immagine di questo disegno:"),
+                format!("{n} copies made by \"Transparent colour\" are not used by any image of this drawing:")
+            )))
+            .with_control(info(list.join("\n")))
+            .with_control(info(
+                tr!(
+                    "Verranno spostate nella sottocartella \"_trasp-non-usate\", non cancellate: \
+                     un altro disegno potrebbe usarle. Quando sei sicuro, cancella quella cartella.",
+                    "They will be moved to the \"_trasp-non-usate\" subfolder, not deleted: \
+                     another drawing may use them. Once you are sure, delete that folder."
+                )
+                .into(),
+            ))
+            .submit_label(tr!("Sposta", "Move"))
+            .cancel_label(tr!("Annulla", "Cancel"))
+            .width(560.0);
+        PurgeDialog { def, done: false }
+    }
+}
+
+impl InteractiveCommand for PurgeDialog {
+    fn prompt(&self) -> String {
+        tr!("RT_PURGE: conferma nella finestra", "RT_PURGE: confirm in the dialog").into()
+    }
+    fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+        CommandStep::NeedPoint
+    }
+    fn on_enter(&mut self) -> CommandStep {
+        CommandStep::Cancel
+    }
+    fn modal_dialog(&self) -> Option<DialogDef> {
+        (!self.done).then(|| self.def.clone())
+    }
+    fn on_dialog_response(&mut self, response: DialogResponse) -> CommandStep {
+        self.done = true;
+        match response {
+            DialogResponse::Submitted(_) => CommandStep::Dispatch("RT_PURGEAPPLY".into()),
+            _ => CommandStep::Cancel,
+        }
+    }
+}
+
+// ── RT_GUIDE ────────────────────────────────────────────────────────────────
+
+/// The guide's sections: (title, text), Italian and English.
+pub fn guide_sections() -> Vec<(&'static str, &'static str)> {
+    if crate::i18n::italian() {
+        vec![
+            ("Inserisci immagine", "Scegli il file (JPG, PNG, TIFF… o il PDF di un estratto di mappa), il modo di dimensionarla e il layer (di serie RASTER), poi clicca il punto in basso a sinistra. Per una mappa catastale da PDF: DPI 300, scala 1:2000, unità metri. L'immagine va dietro al disegno."),
+            ("Allinea con 2 punti", "Georeferenzia: clicca un punto riconoscibile sull'immagine e dove deve andare, poi un secondo punto lontano dal primo e la sua destinazione. L'immagine si sposta, ruota e scala da sola. Invio dopo la prima coppia = solo spostamento."),
+            ("Ruota", "Clicca il centro di rotazione, poi un punto di riferimento sull'immagine e la nuova direzione (allinea a una linea). Invio = angolo esatto in una finestra."),
+            ("Porta dietro", "Mette le immagini scelte dietro alle linee del disegno."),
+            ("Ritaglia / Foro / Separa pezzo", "Clic sull'immagine e due angoli: tiene l'interno, nasconde l'interno o lo stacca in un'immagine nuova da spostare. Dal menu ▾: con un poligono disegnato a clic o con una polilinea chiusa, un cerchio, un'ellisse. Togli ritaglio annulla."),
+            ("Colore trasparente", "Clic sull'immagine, poi sul colore da togliere (es. il bianco della carta). Tolleranza per i colori simili; \"Colora il resto con il colore del layer\" rende le linee del colore del layer, leggibili sullo sfondo scuro. Crea una copia PNG, l'originale resta. Togli trasparenza la spegne."),
+            ("Trascina / Dimensioni / DPI", "Ingrandisci a occhio tenendo fermo un angolo, oppure a larghezza, altezza, fattore di scala o DPI esatti."),
+            ("Cambia percorso / Cerca in cartella", "Collega l'immagine a un altro file; se le foto sono state spostate, scegli un file nella nuova cartella e il plugin ritrova le altre."),
+            ("Elenco / Pulisci copie", "Elenco: immagini con percorso, pixel, dimensioni e stato del file. Pulisci copie: sposta in una sottocartella le copie trasparenti non più usate."),
+            ("Altro", "Ogni comando si annulla con Ctrl+Z. Comandi da tastiera: RT_HELP (riepilogo), RT_LANG IT|EN|AUTO (lingua), RT_DIAG ON|OFF (registro diagnostico). Progetto amatoriale, senza garanzia: tieni una copia dei disegni."),
+        ]
+    } else {
+        vec![
+            ("Insert image", "Choose the file (JPG, PNG, TIFF… or a map extract PDF), how to size it and the layer (RASTER by default), then click the bottom-left point. For a cadastral map PDF: 300 DPI, scale 1:2000, metres. The image goes behind the drawing."),
+            ("Align with 2 points", "Georeference: click a recognisable point on the image and where it must go, then a second point far from the first and its target. The image moves, turns and scales by itself. Enter after the first pair = move only."),
+            ("Rotate", "Click the centre of rotation, then a reference point on the image and its new direction (aligns to a line). Enter = exact angle in a dialog."),
+            ("Send behind", "Puts the chosen images behind the drawing's lines."),
+            ("Clip / Hole / Split piece", "Click the image and two corners: keeps the inside, hides the inside or splits it into a new movable image. From the ▾ menu: with a polygon drawn by clicks or with a closed polyline, circle or ellipse. Remove clip undoes it."),
+            ("Transparent colour", "Click the image, then the colour to drop (e.g. the paper's white). Tolerance for similar colours; \"Colour the rest with the layer's colour\" makes the lines the layer's colour, readable on the dark background. Makes a PNG copy, the original stays. Transparency off turns it off."),
+            ("Drag / Size / DPI", "Enlarge by eye keeping a corner fixed, or to an exact width, height, scale factor or DPI."),
+            ("Change path / Find in folder", "Link the image to another file; if the photos were moved, pick a file in the new folder and the plugin finds the others."),
+            ("List / Clean up copies", "List: images with path, pixels, size and file status. Clean up copies: moves unused transparent copies to a subfolder."),
+            ("More", "Every command undoes with Ctrl+Z. Typed commands: RT_HELP (summary), RT_LANG IT|EN|AUTO (language), RT_DIAG ON|OFF (diagnostic log). Hobby project, no warranty: keep a copy of your drawings."),
+        ]
+    }
+}
+
+pub struct GuideDialog {
+    def: DialogDef,
+    done: bool,
+}
+
+impl GuideDialog {
+    pub fn new() -> Self {
+        let mut def = DialogDef::new(tr!("Raster Tools — guida rapida", "Raster Tools — quick guide"));
+        for (title, text) in guide_sections() {
+            def = def.with_control(info(format!("▸ {title}\n{text}")));
+        }
+        let def = def.submit_label(tr!("Chiudi", "Close")).cancel_label(tr!("Chiudi", "Close")).width(680.0);
+        GuideDialog { def, done: false }
+    }
+}
+
+impl Default for GuideDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl InteractiveCommand for GuideDialog {
+    fn prompt(&self) -> String {
+        tr!("RT_GUIDE: guida rapida", "RT_GUIDE: quick guide").into()
+    }
+    fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+        CommandStep::NeedPoint
+    }
+    fn on_enter(&mut self) -> CommandStep {
+        CommandStep::Cancel
+    }
+    fn modal_dialog(&self) -> Option<DialogDef> {
+        (!self.done).then(|| self.def.clone())
+    }
+    fn on_dialog_response(&mut self, _response: DialogResponse) -> CommandStep {
+        self.done = true;
+        CommandStep::Cancel
     }
 }

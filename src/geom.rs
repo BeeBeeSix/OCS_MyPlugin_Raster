@@ -496,9 +496,118 @@ pub fn fit_proportional(anchor: P3, cursor: P3, w: f64, h: f64) -> Option<(P3, f
     Some(([x0, y0, anchor[2]], k))
 }
 
+/// A plane similarity `p ↦ a·p + t`, with `a` a complex number (`[re, im]`):
+/// rotation by `arg a`, scale `|a|`, then translation `t`. Z is kept.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Similarity {
+    pub a: P2,
+    pub t: P2,
+}
+
+impl Similarity {
+    /// The map that takes `p1` to `q1` and `p2` to `q2` (two-point
+    /// alignment: move, rotate and scale at once). `None` when `p1` and
+    /// `p2` coincide.
+    pub fn from_pairs(p1: P2, q1: P2, p2: P2, q2: P2) -> Option<Similarity> {
+        let dp = [p2[0] - p1[0], p2[1] - p1[1]];
+        let dq = [q2[0] - q1[0], q2[1] - q1[1]];
+        let n = dp[0] * dp[0] + dp[1] * dp[1];
+        if n < 1e-18 || !n.is_finite() {
+            return None;
+        }
+        // a = dq / dp (complex division)
+        let a = [(dq[0] * dp[0] + dq[1] * dp[1]) / n, (dq[1] * dp[0] - dq[0] * dp[1]) / n];
+        if a[0].hypot(a[1]) < 1e-12 {
+            return None;
+        }
+        let t = [q1[0] - (a[0] * p1[0] - a[1] * p1[1]), q1[1] - (a[0] * p1[1] + a[1] * p1[0])];
+        Some(Similarity { a, t })
+    }
+
+    /// Rotation by `angle` radians (counter-clockwise) around `centre`.
+    pub fn rotation(centre: P2, angle: f64) -> Similarity {
+        let a = [angle.cos(), angle.sin()];
+        let t = [centre[0] - (a[0] * centre[0] - a[1] * centre[1]), centre[1] - (a[0] * centre[1] + a[1] * centre[0])];
+        Similarity { a, t }
+    }
+
+    /// A pure move.
+    pub fn translation(d: P2) -> Similarity {
+        Similarity { a: [1.0, 0.0], t: d }
+    }
+
+    pub fn scale(&self) -> f64 {
+        self.a[0].hypot(self.a[1])
+    }
+
+    /// Rotation in degrees, in (-180, 180].
+    pub fn angle_deg(&self) -> f64 {
+        self.a[1].atan2(self.a[0]).to_degrees()
+    }
+
+    pub fn point(&self, p: P3) -> P3 {
+        [
+            self.a[0] * p[0] - self.a[1] * p[1] + self.t[0],
+            self.a[0] * p[1] + self.a[1] * p[0] + self.t[1],
+            p[2],
+        ]
+    }
+
+    /// A direction (no translation).
+    pub fn vector(&self, v: P3) -> P3 {
+        [self.a[0] * v[0] - self.a[1] * v[1], self.a[0] * v[1] + self.a[1] * v[0], v[2]]
+    }
+
+    /// The frame moved by this map: the same pixels land on the mapped points.
+    pub fn frame(&self, f: &Frame) -> Frame {
+        Frame { ins: self.point(f.ins), u: self.vector(f.u), v: self.vector(f.v), ..*f }
+    }
+}
+
+/// The angle, in radians, of the direction from `a` to `b`.
+pub fn direction(a: P3, b: P3) -> Option<f64> {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    (dx.hypot(dy) > EPS).then(|| dy.atan2(dx))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn close3(a: P3, b: P3) -> bool {
+        (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9 && (a[2] - b[2]).abs() < 1e-9
+    }
+
+    #[test]
+    fn two_point_alignment() {
+        // image 100 x 50 px, 1 unit per pixel, at the origin
+        let f = Frame { ins: [0.0, 0.0, 0.0], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0], w: 100.0, h: 50.0 };
+        // pixel corners (0,0) and (100,0) must land on (1000,2000) and (1000,2200):
+        // 90° turn, scale 2
+        let s = Similarity::from_pairs([0.0, 0.0], [1000.0, 2000.0], [100.0, 0.0], [1000.0, 2200.0]).unwrap();
+        assert!((s.scale() - 2.0).abs() < 1e-12 && (s.angle_deg() - 90.0).abs() < 1e-9);
+        let g = s.frame(&f);
+        assert!(close3(g.ins, [1000.0, 2000.0, 0.0]));
+        assert!(close3(g.to_world([100.0, 0.0]), [1000.0, 2200.0, 0.0]));
+        assert!(close3(g.to_world([0.0, 50.0]), [900.0, 2000.0, 0.0]));
+        assert!(close3(g.u, [0.0, 2.0, 0.0]) && close3(g.v, [-2.0, 0.0, 0.0]));
+        // the two picked points map exactly, also off the corners
+        let s = Similarity::from_pairs([12.5, 7.0], [3.0, 4.0], [80.0, 33.0], [10.0, -1.0]).unwrap();
+        assert!(close3(s.point([12.5, 7.0, 5.0]), [3.0, 4.0, 5.0]));
+        assert!(close3(s.point([80.0, 33.0, 0.0]), [10.0, -1.0, 0.0]));
+        assert!(Similarity::from_pairs([1.0, 1.0], [0.0, 0.0], [1.0, 1.0], [5.0, 5.0]).is_none());
+    }
+
+    #[test]
+    fn rotation_about_a_point() {
+        let r = Similarity::rotation([10.0, 10.0], std::f64::consts::FRAC_PI_2);
+        assert!(close3(r.point([20.0, 10.0, 1.0]), [10.0, 20.0, 1.0]));
+        assert!(close3(r.point([10.0, 10.0, 0.0]), [10.0, 10.0, 0.0]));
+        assert!((r.scale() - 1.0).abs() < 1e-12);
+        let m = Similarity::translation([5.0, -2.0]);
+        assert!(close3(m.point([1.0, 1.0, 0.0]), [6.0, -1.0, 0.0]));
+        assert!((direction([0.0, 0.0, 0.0], [0.0, 3.0, 0.0]).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+    }
 
     fn near(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9

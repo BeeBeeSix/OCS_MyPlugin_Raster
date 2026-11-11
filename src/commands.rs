@@ -378,6 +378,24 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
             }
         }
         "RT_LIST" => list(host),
+        "RT_BACK" => {
+            let sel = selected_images(host);
+            if sel.is_empty() {
+                start_pick(host, "RT_BACKAPPLY", tr!("portare dietro", "send behind"));
+            } else {
+                send_back(host, &sel, true);
+            }
+        }
+        "RT_BACKAPPLY" => {
+            if !args.is_empty() {
+                let hs = parse_handles(args[0]);
+                send_back(host, &hs, true);
+            }
+        }
+        "RT_PURGE" => purge_start(host),
+        "RT_PURGEAPPLY" => purge_apply(host),
+        "RT_GUIDE" => host.start_interactive(Box::new(tools::GuideDialog::new())),
+        "RT_DIAG" => diag_cmd(host, rest),
 
         // The ribbon menus' own ids run their default (window) form.
         "RT_CLIP" | "RT_CLIP_MENU" => start_clip(host, tools::ClipKind::Keep),
@@ -422,6 +440,44 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
             } else {
                 let pre = single_selected(host);
                 host.start_interactive(Box::new(tools::ResizeTool::new(images, pre)));
+            }
+        }
+        "RT_ALIGN" | "RT_ROTATE" => {
+            let images = tools::snapshots(host);
+            if images.is_empty() {
+                host.push_error(&tr!(
+                    format!("{verb}: nel disegno non ci sono immagini raster."),
+                    format!("{verb}: the drawing has no raster images.")
+                ));
+            } else {
+                let pre = single_selected(host);
+                if verb == "RT_ALIGN" {
+                    host.start_interactive(Box::new(tools::AlignTool::new(images, pre)));
+                } else {
+                    host.start_interactive(Box::new(tools::RotateTool::new(images, pre)));
+                }
+            }
+        }
+        "RT_ALIGNAPPLY" => {
+            if !args.is_empty() {
+                align_apply(host, &args);
+            }
+        }
+        "RT_ROTATEAPPLY" => {
+            if !args.is_empty() {
+                rotate_apply(host, &args);
+            }
+        }
+        "RT_ROTATEDLG" => {
+            if !args.is_empty() {
+                let h = args.first().and_then(|t| parse_handle(t));
+                let (cx, cy) = (num(args.get(1).copied()), num(args.get(2).copied()));
+                match (h, cx, cy) {
+                    (Some(h), Some(cx), Some(cy)) if fetch(host, h).is_some() => {
+                        host.start_interactive(Box::new(tools::RotateDialog::new(h, [cx, cy])))
+                    }
+                    _ => host.push_error(tr!("Uso: RT_ROTATEDLG <handle> <x> <y>", "Usage: RT_ROTATEDLG <handle> <x> <y>")),
+                }
             }
         }
         "RT_SCALEAPPLY" => {
@@ -539,7 +595,11 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
 fn help(host: &mut dyn HostApi) {
     host.push_info(tr!(
         "Raster Tools — immagini GIF/JPG/PNG/BMP/TIFF/WebP.\n\
-         RT_ATTACH: inserisce un'immagine nel disegno (a schermo, per larghezza, a DPI o 1 pixel = 1 unità).\n\
+         RT_GUIDE: guida rapida in una finestra.\n\
+         RT_ATTACH: inserisce un'immagine o il PDF di una mappa (a schermo, per larghezza, a DPI con scala, o 1 pixel = 1 unità).\n\
+         RT_ALIGN: allinea l'immagine a due punti (sposta, ruota e scala).\n\
+         RT_ROTATE: ruota con il mouse (centro, riferimento, nuova direzione) o di un angolo esatto (Invio).\n\
+         RT_BACK: porta le immagini dietro al disegno.\n\
          RT_CLIP: ritaglia con un rettangolo (tiene l'interno; ripetuto, restringe).\n\
          RT_CLIPHOLE: nasconde la parte dentro il rettangolo.\n\
          RT_CUT: separa la parte nel rettangolo in una nuova immagine, spostabile.\n\
@@ -553,9 +613,15 @@ fn help(host: &mut dyn HostApi) {
          RT_PATH: cambia il file su disco dell'immagine.\n\
          RT_FIND: cerca in una cartella le immagini il cui file manca.\n\
          RT_LIST: elenco immagini con percorso, pixel, dimensioni e stato.\n\
-         RT_LANG IT|EN|AUTO: lingua del plugin (AUTO segue Open CAD Studio).",
+         RT_PURGE: sposta in una sottocartella le copie trasparenti non usate.\n\
+         RT_LANG IT|EN|AUTO: lingua del plugin (AUTO segue Open CAD Studio).\n\
+         RT_DIAG ON|OFF: registro diagnostico.",
         "Raster Tools — GIF/JPG/PNG/BMP/TIFF/WebP images.\n\
-         RT_ATTACH: insert an image into the drawing (on screen, by width, by DPI or 1 pixel = 1 unit).\n\
+         RT_GUIDE: quick guide in a dialog.\n\
+         RT_ATTACH: insert an image or a map PDF (on screen, by width, by DPI with scale, or 1 pixel = 1 unit).\n\
+         RT_ALIGN: align the image to two points (move, turn and scale).\n\
+         RT_ROTATE: rotate by mouse (centre, reference, new direction) or by an exact angle (Enter).\n\
+         RT_BACK: send images behind the drawing.\n\
          RT_CLIP: clip with a rectangle (keeps the inside; repeated, it narrows).\n\
          RT_CLIPHOLE: hide the part inside the rectangle.\n\
          RT_CUT: split the part inside the rectangle off into a new, movable image.\n\
@@ -569,7 +635,9 @@ fn help(host: &mut dyn HostApi) {
          RT_PATH: change the image's file on disk.\n\
          RT_FIND: search a folder for images whose file is missing.\n\
          RT_LIST: list images with path, pixels, size and status.\n\
-         RT_LANG IT|EN|AUTO: plugin language (AUTO follows Open CAD Studio)."
+         RT_PURGE: move unused transparent copies to a subfolder.\n\
+         RT_LANG IT|EN|AUTO: plugin language (AUTO follows Open CAD Studio).\n\
+         RT_DIAG ON|OFF: diagnostic log."
     ));
 }
 
@@ -722,11 +790,37 @@ fn attach_place(host: &mut dyn HostApi, args: &[&str]) {
         host.push_error(tr!("RT_ATTACH: nessun file scelto.", "RT_ATTACH: no file chosen."));
         return;
     };
-    let p = Path::new(&path);
-    if !p.is_file() {
+    if !Path::new(&path).is_file() {
         host.push_error(&tr!(format!("RT_ATTACH: il file \"{path}\" non esiste."), format!("RT_ATTACH: the file \"{path}\" does not exist.")));
         return;
     }
+    // A PDF (e.g. a cadastral map extract): its picture becomes an image file.
+    let mut pdf_note = String::new();
+    let path = if is_pdf(&path) {
+        match pdf_to_image(host, Path::new(&path)) {
+            Ok((out, dpi)) => {
+                let name = file_name_only(&out).to_string();
+                pdf_note = match dpi {
+                    Some(d) => tr!(
+                        format!(" Dal PDF: {name}, risoluzione {} DPI.", fmt_len(d)),
+                        format!(" From the PDF: {name}, resolution {} DPI.", fmt_len(d))
+                    ),
+                    None => tr!(format!(" Dal PDF: {name}."), format!(" From the PDF: {name}.")),
+                };
+                out
+            }
+            Err(e) => {
+                host.push_error(&tr!(
+                    format!("RT_ATTACH: dal PDF \"{}\" non si ricava un'immagine: {e}.", file_name_only(&path)),
+                    format!("RT_ATTACH: no picture can be taken from the PDF \"{}\": {e}.", file_name_only(&path))
+                ));
+                return;
+            }
+        }
+    } else {
+        path
+    };
+    let p = Path::new(&path);
     let (w, h) = match imgsize::read_dims(p) {
         Ok(d) if d.0 > 0 && d.1 > 0 => d,
         _ => {
@@ -744,6 +838,8 @@ fn attach_place(host: &mut dyn HostApi, args: &[&str]) {
     let width = num(args.get(1).copied());
     let dpi = num(args.get(2).copied());
     let unit = args.get(3).copied().unwrap_or("MM");
+    // map scale 1:N, for DPI mode (a map at 1:2000 printed at 300 DPI)
+    let map_scale = num(args.get(4).copied()).filter(|k| *k > 0.0).unwrap_or(1.0);
     let px = match mode.as_str() {
         "SCREEN" => None,
         "PIXEL" => Some(1.0),
@@ -755,7 +851,7 @@ fn attach_place(host: &mut dyn HostApi, args: &[&str]) {
             }
         },
         "DPI" => match (dpi, geom::units_per_inch(unit)) {
-            (Some(d), Some(upi)) if d > 0.0 => Some(upi / d),
+            (Some(d), Some(upi)) if d > 0.0 => Some(upi / d * map_scale),
             _ => {
                 host.push_error(tr!("RT_ATTACH: indica un valore DPI maggiore di zero.", "RT_ATTACH: enter a DPI value greater than zero."));
                 return;
@@ -769,9 +865,11 @@ fn attach_place(host: &mut dyn HostApi, args: &[&str]) {
     if let Some(px) = px {
         let (name, ww, hh) = (file_name_only(&path), fmt_len(w as f64 * px), fmt_len(h as f64 * px));
         host.push_info(&tr!(
-            format!("RT_ATTACH: {name} — {w}×{h} px, {ww} × {hh} unità."),
-            format!("RT_ATTACH: {name} — {w}×{h} px, {ww} × {hh} units.")
+            format!("RT_ATTACH: {name} — {w}×{h} px, {ww} × {hh} unità.{pdf_note}"),
+            format!("RT_ATTACH: {name} — {w}×{h} px, {ww} × {hh} units.{pdf_note}")
         ));
+    } else if !pdf_note.is_empty() {
+        host.push_info(&format!("RT_ATTACH:{pdf_note}"));
     }
     host.start_interactive(Box::new(tools::AttachTool::new(path, w, h, px)));
 }
@@ -841,6 +939,8 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
         return;
     }
     host.set_dirty();
+    // a scan goes behind the lines already drawn
+    let behind = send_back(host, &[handle], false);
     let _ = host.set_selection(&[handle]);
     let (name, ww, hh) = (file_name_only(&path), fmt_len(w as f64 * px), fmt_len(h as f64 * px));
     let layer = host
@@ -850,9 +950,201 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
         .filter(|l| !l.is_empty())
         .unwrap_or_else(|| "0".into());
     host.push_info(&tr!(
-        format!("RT_ATTACH: inserita {name} ({w}×{h} px, {ww} × {hh} unità) sul layer {layer}{new}.", new = if created { " (creato)" } else { "" }),
-        format!("RT_ATTACH: inserted {name} ({w}×{h} px, {ww} × {hh} units) on layer {layer}{new}.", new = if created { " (new)" } else { "" })
+        format!(
+            "RT_ATTACH: inserita {name} ({w}×{h} px, {ww} × {hh} unità) sul layer {layer}{new}{back}.",
+            new = if created { " (creato)" } else { "" },
+            back = if behind { ", dietro al disegno" } else { "" }
+        ),
+        format!(
+            "RT_ATTACH: inserted {name} ({w}×{h} px, {ww} × {hh} units) on layer {layer}{new}{back}.",
+            new = if created { " (new)" } else { "" },
+            back = if behind { ", behind the drawing" } else { "" }
+        )
     ));
+}
+
+// ── PDF, draw order, clean-up, diagnostics ──────────────────────────────────
+
+pub fn is_pdf(path: &str) -> bool {
+    Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+}
+
+/// Take the picture out of a PDF into an image file next to it:
+/// `<name>_pdf.png` (or `.jpg` when the PDF holds a JPEG, copied as is).
+/// An existing copy newer than the PDF is reused. Returns the image path and
+/// the resolution when the picture fills the page.
+fn pdf_to_image(host: &mut dyn HostApi, pdf: &Path) -> Result<(String, Option<f64>), String> {
+    let data = std::fs::read(pdf).map_err(|e| e.to_string())?;
+    let found = crate::pdf::largest_picture(&data)?;
+    let dir = pdf.parent().map(Path::to_path_buf).unwrap_or_default();
+    let stem = pdf.file_stem().and_then(|s| s.to_str()).unwrap_or("pdf");
+    let pdf_time = std::fs::metadata(pdf).and_then(|m| m.modified()).ok();
+    let fresh = |p: &Path| {
+        let t = std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        matches!((t, pdf_time), (Some(t), Some(pt)) if t >= pt)
+    };
+    match found {
+        crate::pdf::Found::Jpeg { data, dpi, .. } => {
+            let out = dir.join(format!("{stem}_pdf.jpg"));
+            if !fresh(&out) {
+                std::fs::write(&out, &data).map_err(|e| e.to_string())?;
+            }
+            Ok((out.to_string_lossy().into_owned(), dpi))
+        }
+        crate::pdf::Found::Raw(p) => {
+            let out = dir.join(format!("{stem}_pdf.png"));
+            if fresh(&out) {
+                return Ok((out.to_string_lossy().into_owned(), p.dpi));
+            }
+            crate::diag::log(&format!("PDF {}: {}x{} dpi {:?}", pdf.display(), p.w, p.h, p.dpi));
+            let grey = p.rgba.chunks_exact(4).all(|c| c[0] == c[1] && c[1] == c[2]);
+            let saved = if grey {
+                let l: Vec<u8> = p.rgba.chunks_exact(4).map(|c| c[0]).collect();
+                save_png_as(host, &out, p.w, p.h, &l, image::ExtendedColorType::L8)
+            } else {
+                save_png(host, &out, p.w, p.h, &p.rgba)
+            };
+            saved.map(|_| (out.to_string_lossy().into_owned(), p.dpi))
+        }
+    }
+}
+
+/// Put images behind everything else (the host's `DRAWORDER BACK` on them),
+/// keeping the selection as it was. `report`: say so on the command line.
+fn send_back(host: &mut dyn HostApi, handles: &[Handle], report: bool) -> bool {
+    if handles.is_empty() {
+        return false;
+    }
+    let before = host.selection();
+    let ok = host.set_selection(handles).is_ok() && host.execute_command("DRAWORDER BACK");
+    let _ = host.set_selection(&before);
+    if report {
+        if ok {
+            host.push_info(&tr!(
+                format!("RT_BACK: {} immagine/i portate dietro al disegno.", handles.len()),
+                format!("RT_BACK: {} image(s) sent behind the drawing.", handles.len())
+            ));
+        } else {
+            host.push_error(tr!(
+                "RT_BACK: Open CAD Studio non ha accettato DRAWORDER (forse i comandi da script sono disattivati, SCRIPTCOMMANDS). Seleziona l'immagine e usa DRAWORDER › Dietro.",
+                "RT_BACK: Open CAD Studio did not accept DRAWORDER (scripted commands may be off, SCRIPTCOMMANDS). Select the image and use DRAWORDER › Back."
+            ));
+        }
+    }
+    ok
+}
+
+/// Copies left by RT_TRANSP that no image of this drawing uses, waiting for
+/// RT_PURGEAPPLY.
+static PURGE_LIST: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// `<stem>_trasp-<n>.png` files in the folders of this drawing's images
+/// that none of its images uses.
+pub fn unused_copies(host: &dyn HostApi) -> Vec<PathBuf> {
+    let dir = dwg_dir(host);
+    let norm = |p: &Path| p.to_string_lossy().replace('/', "\\").replace("\\.\\", "\\").to_lowercase();
+    let mut used = std::collections::HashSet::new();
+    let mut folders = std::collections::BTreeSet::new();
+    for img in all_images(host) {
+        if let Some(p) = resolve(&img.file_path, dir.as_deref()) {
+            used.insert(norm(&p));
+            if let Some(f) = p.parent() {
+                folders.insert(f.to_path_buf());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for f in folders {
+        let Ok(rd) = std::fs::read_dir(&f) else { continue };
+        for e in rd.flatten() {
+            let p = e.path();
+            let is_copy = p.extension().is_some_and(|x| x.eq_ignore_ascii_case("png"))
+                && p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| crate::pixels::base_stem(s) != s);
+            if is_copy && p.is_file() && !used.contains(&norm(&p)) {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+fn purge_start(host: &mut dyn HostApi) {
+    let list = unused_copies(host);
+    if list.is_empty() {
+        host.push_info(tr!(
+            "RT_PURGE: nessuna copia trasparente inutilizzata nelle cartelle delle immagini di questo disegno.",
+            "RT_PURGE: no unused transparent copies in the folders of this drawing's images."
+        ));
+        return;
+    }
+    let names: Vec<String> = list.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    *PURGE_LIST.lock().unwrap_or_else(|e| e.into_inner()) = list;
+    host.start_interactive(Box::new(tools::PurgeDialog::new(names)));
+}
+
+/// Move the listed copies into a `_trasp-non-usate` subfolder (not deleted:
+/// another drawing may still use one).
+fn purge_apply(host: &mut dyn HostApi) {
+    let list = std::mem::take(&mut *PURGE_LIST.lock().unwrap_or_else(|e| e.into_inner()));
+    if list.is_empty() {
+        return;
+    }
+    let (mut moved, mut failed) = (0, Vec::new());
+    let mut where_to = std::collections::BTreeSet::new();
+    for p in &list {
+        let Some(dir) = p.parent() else { continue };
+        let bin = dir.join("_trasp-non-usate");
+        let Some(name) = p.file_name() else { continue };
+        let ok = std::fs::create_dir_all(&bin).is_ok() && std::fs::rename(p, bin.join(name)).is_ok();
+        if ok {
+            moved += 1;
+            where_to.insert(bin.to_string_lossy().into_owned());
+        } else {
+            failed.push(file_name_only(&p.to_string_lossy()).to_string());
+        }
+    }
+    let folders = where_to.into_iter().collect::<Vec<_>>().join(", ");
+    if moved > 0 {
+        host.push_info(&tr!(
+            format!("RT_PURGE: {moved} copie spostate in {folders}. Controlla che nessun altro disegno le usi, poi puoi cancellare la cartella."),
+            format!("RT_PURGE: {moved} copies moved to {folders}. Check that no other drawing uses them, then you can delete the folder.")
+        ));
+    }
+    if !failed.is_empty() {
+        host.push_error(&tr!(
+            format!("RT_PURGE: non spostate (in uso o protette): {}.", failed.join(", ")),
+            format!("RT_PURGE: not moved (in use or protected): {}.", failed.join(", "))
+        ));
+    }
+}
+
+fn diag_cmd(host: &mut dyn HostApi, arg: &str) {
+    let path = crate::diag::path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    let want = match arg.trim().to_ascii_uppercase().as_str() {
+        "" => None,
+        "ON" | "SI" | "SÌ" | "1" => Some(true),
+        "OFF" | "NO" | "0" => Some(false),
+        _ => {
+            host.push_error(tr!("Uso: RT_DIAG ON | OFF", "Usage: RT_DIAG ON | OFF"));
+            return;
+        }
+    };
+    if let Some(on) = want {
+        if let Err(e) = crate::diag::set_enabled(on) {
+            host.push_error(&format!("RT_DIAG: {e}"));
+            return;
+        }
+    }
+    let on = crate::diag::enabled();
+    host.push_info(&if on {
+        tr!(format!("RT_DIAG: registro diagnostico ATTIVO, in {path}."), format!("RT_DIAG: diagnostic log ON, in {path}."))
+    } else {
+        tr!(
+            "RT_DIAG: registro diagnostico spento (RT_DIAG ON per attivarlo).".to_string(),
+            "RT_DIAG: diagnostic log off (RT_DIAG ON to turn it on).".to_string()
+        )
+    });
 }
 
 // ── RT_TRANSP ───────────────────────────────────────────────────────────────
@@ -914,6 +1206,18 @@ impl<W: std::io::Write> std::io::Write for Heartbeat<'_, '_, W> {
 /// Save RGBA8 pixels as a PNG, with fast compression (a 70-megapixel scan
 /// takes seconds instead of minutes) and the host kept informed.
 fn save_png(host: &mut dyn HostApi, out: &Path, w: u32, h: u32, px: &[u8]) -> Result<(), String> {
+    save_png_as(host, out, w, h, px, image::ExtendedColorType::Rgba8)
+}
+
+/// [`save_png`] for any colour layout (`L8` for greyscale pictures).
+fn save_png_as(
+    host: &mut dyn HostApi,
+    out: &Path,
+    w: u32,
+    h: u32,
+    px: &[u8],
+    colour: image::ExtendedColorType,
+) -> Result<(), String> {
     use image::ImageEncoder;
     let file = std::fs::File::create(out).map_err(|e| e.to_string())?;
     let mut writer = Heartbeat { inner: std::io::BufWriter::with_capacity(1 << 20, file), host, last: std::time::Instant::now() };
@@ -922,7 +1226,7 @@ fn save_png(host: &mut dyn HostApi, out: &Path, w: u32, h: u32, px: &[u8]) -> Re
         image::codecs::png::CompressionType::Fast,
         image::codecs::png::FilterType::Up,
     )
-    .write_image(px, w, h, image::ExtendedColorType::Rgba8)
+    .write_image(px, w, h, colour)
     .map_err(|e| e.to_string())
     .and_then(|_| std::io::Write::flush(&mut writer).map_err(|e| e.to_string()));
     if result.is_err() {
@@ -1471,6 +1775,100 @@ fn scale_apply(host: &mut dyn HostApi, args: &[&str]) {
     let ok = host.update_entity(EntityType::RasterImage(img));
     host.end_undo_group();
     report(host, ok, &tr!(format!("RT_RESIZE: scala {}, nuove dimensioni {} × {}.", fmt_len(sx), fmt_len(w), fmt_len(hh)), format!("RT_RESIZE: scale {}, new size {} × {}.", fmt_len(sx), fmt_len(w), fmt_len(hh))));
+}
+
+/// Move / turn / scale an image's frame (clip outlines live in pixel space
+/// and follow by themselves). One undo step.
+fn transform_image(host: &mut dyn HostApi, mut img: RasterImage, s: &geom::Similarity, label: &str) -> bool {
+    let f = s.frame(&frame(&img));
+    img.insertion_point = v3(f.ins);
+    img.u_vector = v3(f.u);
+    img.v_vector = v3(f.v);
+    host.begin_undo_group(label);
+    let ok = host.update_entity(EntityType::RasterImage(img));
+    host.end_undo_group();
+    ok
+}
+
+fn fmt_angle(deg: f64) -> String {
+    let d = if deg > 180.0 { deg - 360.0 } else if deg <= -180.0 { deg + 360.0 } else { deg };
+    let d = if d.abs() < 5e-5 { 0.0 } else { d };
+    let t = format!("{:.4}", d);
+    t.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// `RT_ALIGNAPPLY <h> <p1x> <p1y> <q1x> <q1y> [<p2x> <p2y> <q2x> <q2y>]` —
+/// p on the image goes to q. One pair moves; two pairs move, turn and scale.
+fn align_apply(host: &mut dyn HostApi, args: &[&str]) {
+    let usage = tr!(
+        "Uso: RT_ALIGNAPPLY <handle> <p1x> <p1y> <q1x> <q1y> [<p2x> <p2y> <q2x> <q2y>]",
+        "Usage: RT_ALIGNAPPLY <handle> <p1x> <p1y> <q1x> <q1y> [<p2x> <p2y> <q2x> <q2y>]"
+    );
+    let h = args.first().and_then(|t| parse_handle(t));
+    let n: Vec<f64> = args.iter().skip(1).filter_map(|t| num(Some(t))).collect();
+    let (Some(h), true) = (h, n.len() == 4 || n.len() == 8) else {
+        host.push_error(usage);
+        return;
+    };
+    let Some(img) = fetch(host, h) else {
+        host.push_error(tr!("RT_ALIGN: l'entità non è un'immagine raster.", "RT_ALIGN: the entity is not a raster image."));
+        return;
+    };
+    let sim = if n.len() == 4 {
+        Some(geom::Similarity::translation([n[2] - n[0], n[3] - n[1]]))
+    } else {
+        geom::Similarity::from_pairs([n[0], n[1]], [n[2], n[3]], [n[4], n[5]], [n[6], n[7]])
+    };
+    let Some(sim) = sim.filter(|s| valid_factor(s.scale())) else {
+        host.push_error(tr!(
+            "RT_ALIGN: i due punti sull'immagine devono essere distinti (e le destinazioni anche).",
+            "RT_ALIGN: the two points on the image must differ (and so must their targets)."
+        ));
+        return;
+    };
+    let before = frame(&img).world_size();
+    let ok = transform_image(host, img, &sim, "RT_ALIGN");
+    let msg = if n.len() == 4 {
+        tr!(
+            format!("RT_ALIGN: immagine spostata di {}, {}.", fmt_len(n[2] - n[0]), fmt_len(n[3] - n[1])),
+            format!("RT_ALIGN: image moved by {}, {}.", fmt_len(n[2] - n[0]), fmt_len(n[3] - n[1]))
+        )
+    } else {
+        let (k, a) = (sim.scale(), fmt_angle(sim.angle_deg()));
+        let (w, hh) = (before.0 * k, before.1 * k);
+        tr!(
+            format!(
+                "RT_ALIGN: immagine allineata ai due punti — scala ×{}, rotazione {a}°, nuove dimensioni {} × {}.",
+                fmt_len(k),
+                fmt_len(w),
+                fmt_len(hh)
+            ),
+            format!(
+                "RT_ALIGN: image aligned to the two points — scale ×{}, rotation {a}°, new size {} × {}.",
+                fmt_len(k),
+                fmt_len(w),
+                fmt_len(hh)
+            )
+        )
+    };
+    report(host, ok, &msg);
+}
+
+/// `RT_ROTATEAPPLY <h> <degrees> <cx> <cy>` — counter-clockwise.
+fn rotate_apply(host: &mut dyn HostApi, args: &[&str]) {
+    let h = args.first().and_then(|t| parse_handle(t));
+    let (a, cx, cy) = (num(args.get(1).copied()), num(args.get(2).copied()), num(args.get(3).copied()));
+    let (Some(h), Some(a), Some(cx), Some(cy)) = (h, a, cx, cy) else {
+        host.push_error(tr!("Uso: RT_ROTATEAPPLY <handle> <gradi> <x> <y>", "Usage: RT_ROTATEAPPLY <handle> <degrees> <x> <y>"));
+        return;
+    };
+    let Some(img) = fetch(host, h) else {
+        host.push_error(tr!("RT_ROTATE: l'entità non è un'immagine raster.", "RT_ROTATE: the entity is not a raster image."));
+        return;
+    };
+    let ok = transform_image(host, img, &geom::Similarity::rotation([cx, cy], a.to_radians()), "RT_ROTATE");
+    let a = fmt_angle(a);
+    report(host, ok, &tr!(format!("RT_ROTATE: immagine ruotata di {a}°."), format!("RT_ROTATE: image rotated by {a}°.")));
 }
 
 /// `RT_SIZEAPPLY <handles> W|H|WH|F|DPI <w> <h> <factor> <dpi> MM|CM|M|IN BL|CTR FULL|VIS`

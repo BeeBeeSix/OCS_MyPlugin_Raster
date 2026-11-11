@@ -12,8 +12,11 @@ A plugin for [Open CAD Studio](https://github.com/HakanSeven12/OpenCADStudio)
 that adds a **Raster** ribbon tab for GIF, JPG, PNG, BMP, TIFF and WebP images
 in DWG/DXF drawings:
 
-- **insert** an image on a layer of your choice (RASTER by default), sized on
-  screen, by width, by DPI or 1 pixel = 1 unit;
+- **insert** an image — or the picture inside a **PDF** map extract — on a layer
+  of your choice (RASTER by default), behind the drawing, sized on screen, by
+  width, by DPI with **map scale** or 1 pixel = 1 unit;
+- **georeference** it with **two points** (move, turn and scale at once),
+  **rotate** it, send it **behind** the drawing;
 - **clip** an image (keep the inside), cut a **hole** (hide the inside) or
   **split a piece** off into a new image you can move — with a **rectangle**,
   a **polygon** drawn by clicks, or an existing **closed polyline**, circle or
@@ -28,7 +31,8 @@ in DWG/DXF drawings:
 The interface is in **English**, or in **Italian** when Open CAD Studio runs in
 Italian. `RT_LANG IT|EN|AUTO` forces a language.
 
-Full command reference: [PLUGIN.md](PLUGIN.md).
+Full command reference: [PLUGIN.md](PLUGIN.md). In the CAD, the **Guide** button
+on the Raster tab shows a short guide.
 
 ## Quick guide
 
@@ -43,6 +47,8 @@ Full command reference: [PLUGIN.md](PLUGIN.md).
 | bring a scan to 1:1 scale | select the image → **Size / DPI** → *DPI* mode, 300, millimetres |
 | enlarge by eye | **Drag**: fixed corner, then opposite corner |
 | drop a scan's white background | **Transparent colour**, click the image, click the white, *only the connected area* |
+| bring in a cadastral map PDF at real size | **Insert image**, pick the PDF, *DPI* 300, scale 1:2000, metres |
+| fit a scan onto the survey | **Align 2 points**: two points on the scan, each followed by its true position |
 | a black-on-white map readable on the dark screen | **Transparent colour**, click the white, *colour the rest with the layer's colour* (RASTER layer: white) |
 | the photo was moved to another drive | **Find in folder** and pick a file in the new folder |
 | replace the photo with another | select the image → **Change path** → pick the file |
@@ -109,6 +115,7 @@ src/commands.rs     RT_* commands and drawing edits
 src/tools.rs        interactive tools (pick, rectangle, polygon, drag) and dialogs
 src/geom.rs         pure geometry: pixel ↔ drawing, clipping, scaling (tested)
 src/imgsize.rs      pixel size from the file header (tested)
+src/pdf.rs          picture inside a PDF page (tested)
 src/pixels.rs       transparent colour on RGBA pixels (tested)
 scripts/release.ps1 publish a new version
 CHANGELOG.md        changelog

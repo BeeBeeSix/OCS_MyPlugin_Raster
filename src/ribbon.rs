@@ -71,6 +71,14 @@ impl CadModule for RasterModule {
                     tools: vec![cmd("RT_ATTACH", tr!("Inserisci immagine", "Insert image"), include_bytes!("../icons/attach.svg"))],
                 },
                 RibbonGroup {
+                    title: tr!("Posizione", "Position"),
+                    tools: vec![
+                        cmd("RT_ALIGN", tr!("Allinea 2 punti", "Align 2 points"), include_bytes!("../icons/align.svg")),
+                        cmd("RT_ROTATE", tr!("Ruota", "Rotate"), include_bytes!("../icons/rotate.svg")),
+                        cmd("RT_BACK", tr!("Porta dietro", "Send behind"), include_bytes!("../icons/back.svg")),
+                    ],
+                },
+                RibbonGroup {
                     title: tr!("Ritaglio", "Clip"),
                     tools: vec![
                         clip_menu("RT_CLIP_MENU", tr!("Ritaglia", "Clip"), CLIP, ["RT_CLIP", "RT_CLIPPOLY", "RT_CLIPPL"]),
@@ -109,7 +117,12 @@ impl CadModule for RasterModule {
                             tr!("Scegli un file qualsiasi nella cartella dove cercare le immagini mancanti", "Choose any file in the folder to search for missing images"),
                         ),
                         cmd("RT_LIST", tr!("Elenco", "List"), include_bytes!("../icons/list.svg")),
+                        cmd("RT_PURGE", tr!("Pulisci copie", "Clean up copies"), include_bytes!("../icons/purge.svg")),
                     ],
+                },
+                RibbonGroup {
+                    title: tr!("Aiuto", "Help"),
+                    tools: vec![cmd("RT_GUIDE", tr!("Guida", "Guide"), include_bytes!("../icons/guide.svg"))],
                 },
             ]
         })

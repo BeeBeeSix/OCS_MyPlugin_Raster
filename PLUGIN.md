@@ -6,8 +6,9 @@ External add-on for [Open CAD Studio](https://github.com/HakanSeven12/OpenCADStu
 that handles the raster images linked to a drawing (IMAGE entities):
 GIF, JPG, PNG, BMP, TIFF and WebP — the same formats the CAD displays.
 
-Every command starts with `RT_`. The **Raster** ribbon tab groups them in five
-panels: *Insert*, *Clip*, *Transparency*, *Size*, *File*. In the *Clip* panel the *Clip*,
+Every command starts with `RT_`. The **Raster** ribbon tab groups them in seven
+panels: *Insert*, *Position*, *Clip*, *Transparency*, *Size*, *File*, *Help*. The **Guide** button
+(`RT_GUIDE`) opens a short guide to every command. In the *Clip* panel the *Clip*,
 *Hole* and *Split piece* buttons have a menu (▾ arrow) to choose the outline:
 **Rectangle**, **Polygon** or **From polyline**; clicking the button itself uses
 the rectangle.
@@ -32,7 +33,7 @@ choice is kept in `rastertools-lang.txt` in Open CAD Studio's settings folder.
 
 | Command | Ribbon | What it does |
 |---|---|---|
-| `RT_ATTACH` | Insert › Insert image | **Inserts a new image** into the drawing. A dialog asks for the file and how to size it: *on screen* (insertion point and opposite corner, proportional; Enter at the second point = 1 pixel per unit), *width in the drawing*, *DPI resolution* (with the drawing unit, suggested from `INSUNITS`) or *1 pixel = 1 unit*. Then click the insertion point (bottom-left corner). The dialog also asks for the **layer**: **RASTER** is proposed first (created, white, if the drawing has none), or any other layer of the drawing. The file stays linked, it is not copied into the drawing. |
+| `RT_ATTACH` | Insert › Insert image | **Inserts a new image** into the drawing. A dialog asks for the file and how to size it: *on screen* (insertion point and opposite corner, proportional; Enter at the second point = 1 pixel per unit), *width in the drawing*, *DPI resolution* (with the drawing unit, suggested from `INSUNITS`) or *1 pixel = 1 unit*. Then click the insertion point (bottom-left corner). The dialog also asks for the **layer**: **RASTER** is proposed first (created, white, if the drawing has none), or any other layer of the drawing. The file stays linked, it is not copied into the drawing. **PDF**: choose a PDF (e.g. an Italian cadastral *estratto di mappa*) and the plugin takes out the picture it holds — the largest image in the file, at its own resolution — into `<name>_pdf.png` next to the PDF (a JPEG inside is copied as `<name>_pdf.jpg`); the message tells the PDF's resolution. In *DPI* mode the **map scale 1:N** gives the real size: a cadastral map PDF at 300 DPI, scale 1:2000, unit metres comes in at its true size in metres. Vector-only PDFs cannot be converted. New images go **behind** the drawing. |
 | `RT_CLIP` | Clip › Clip | Rectangular clip: pick the image (or select it first), then two corners. **Only the inside** of the rectangle stays visible. Repeated on an image already clipped, it **narrows** the clip (intersection). If the image is rotated, the rectangle drawn on screen becomes a polygonal outline. |
 | `RT_CLIPHOLE` | Clip › Hole | As above, but **hides the inside** of the rectangle (inverted clip). |
 | `RT_CUT` | Clip › Split piece | "Scissors": the part inside the rectangle becomes a **new image** (same file, clipped to the rectangle) and the original keeps a hole in its place. The piece stays selected: move it with `MOVE`. Needs an image that is not clipped yet. |
@@ -41,12 +42,18 @@ choice is kept in `rastertools-lang.txt` in Open CAD Studio's settings folder.
 | `RT_UNCLIP` | Clip › Remove clip | Removes the clip from the selected images (or the one you pick). |
 | `RT_TRANSP` | Transparency › Transparent colour | Makes **one colour of the image transparent**. Pick the image (or select it first), then **click on the image** the colour to drop (an orange crosshair follows the cursor). A dialog shows the colour (hex and RGB) and asks for the **tolerance** in % (0 = that exact colour only; 10% is suggested for JPG/WebP, whose colours drift slightly, 2% for the rest) and whether to act on the **whole image** or **only the area connected to the clicked point** (handy to drop the outer background while the same colour inside the drawing stays). The plugin saves a **PNG copy** with the transparency in the original's folder, `<name>_trasp-N.png` (the original is not changed), relinks the image to the copy and turns transparency on. Run it again to drop more colours: each run makes a new copy. Option **Colour the rest with the layer's colour** (on by default when the picked colour is light, e.g. a scan's paper): the background disappears and everything else takes the colour of the image's layer, with soft edges — black lines on a white map become, say, white lines that stand out on the CAD's dark background, without the pale fringe left by plain transparency. It applies to the whole image (the area option is ignored); to change the colour later, change the layer's colour and run it again on the original. Undo with `U` / Ctrl+Z. |
 | `RT_TRANSPOFF` | Transparency › Transparency off | Turns transparency off on the selected images (or the one you pick): the dropped colours show again. To go back to the original file use `RT_PATH`. |
+| `RT_ALIGN` | Position › Align 2 points | **Georeferencing**: pick the image, click a recognisable point on it and the point where it must go, then a second point (far from the first) and its target. The image moves, turns and scales so both points land exactly (orange preview). **Enter** after the first pair moves it only. |
+| `RT_ROTATE` | Position › Rotate | Pick the image, click the **centre of rotation**, then a **reference point** on the image and the **new direction** of that reference (aligns the image to a line). **Enter** at the centre or reference step asks for an **exact angle** (positive = counter-clockwise; around the image centre if no centre was clicked). |
+| `RT_BACK` | Position › Send behind | Puts the selected images (or the one you pick) **behind** the drawing, with the host command `DRAWORDER BACK`. `RT_ATTACH` does it by itself for new images. |
 | `RT_RESIZE` | Size › Drag | Proportional on-screen resize: pick the image, click near the corner that must **stay fixed**, then move the opposite corner to its new position (orange preview). Corners are those of the visible part. |
 | `RT_SIZE` | Size › Size / DPI | Dialog with: width or height (proportional), free width and height, scale factor, or **print resolution** (DPI) with the drawing unit (mm, cm, m, inches). Fixed point: bottom-left corner or centre. Option to measure the visible part. Works on every selected image. |
 | `RT_PATH` | File › Change path | Changes the image's **file on disk**. From the ribbon the file picker opens at once and the path applies to the selected images (if none, you pick the image afterwards). Typed without arguments it opens a dialog with the current path and its status. Every image using the same file is relinked; the **width in the drawing stays the same** even if the new file has a different pixel count (any clip is rescaled). |
 | `RT_FIND` | File › Find in folder | For images whose file is **missing**: pick any file in the folder where they are now and the plugin relinks each image to the file with the same name, subfolders included. |
 | `RT_LIST` | File › List | Lists the images: handle, name, pixels, drawing size, pixel size, clip, file status (`found` / `MISSING`) and full path. |
+| `RT_PURGE` | File › Clean up copies | Finds the `<name>_trasp-N.png` copies made by `RT_TRANSP`, in the folders of this drawing's images, that **no image of this drawing uses**, lists them and — after you confirm — moves them to a `_trasp-non-usate` subfolder (not deleted: another drawing may use them). |
+| `RT_GUIDE` | Help › Guide | Short guide to all commands, in a dialog. |
 | `RT_LANG` | — | Interface language: `IT`, `EN` or `AUTO` (see above). |
+| `RT_DIAG` | — | `ON` / `OFF`: diagnostic log `rastertools-log.txt` in Open CAD Studio's settings folder (off by default; useful when a command stops without messages). |
 | `RT_HELP` | — | Command summary. |
 
 ### Finding the file
@@ -77,6 +84,9 @@ handles are separated by commas.
 | `RT_SCALEAPPLY <h> <anchor_x_px> <anchor_y_px> <factor_x> [factor_y]` | Scales around a point given in image pixels (0,0 = insertion corner). |
 | `RT_SIZEAPPLY <h,...> W\|H\|WH\|F\|DPI <width> <height> <factor> <dpi> MM\|CM\|M\|IN BL\|CTR FULL\|VIS` | Like the `RT_SIZE` dialog. E.g.: `RT_SIZEAPPLY 2A DPI 0 0 0 300 MM BL FULL`. |
 | `RT_SIZEDLG <h,...>` / `RT_PATHDLG <h,...>` | Opens the dialog for those images. |
+| `RT_ALIGNAPPLY <h> <p1x> <p1y> <q1x> <q1y> [<p2x> <p2y> <q2x> <q2y>]` | Moves the image so p1 lands on q1 (and, with the second pair, turns and scales it so p2 lands on q2). |
+| `RT_ROTATEAPPLY <h> <degrees> <x> <y>` | Rotates counter-clockwise around (x, y). |
+| `RT_BACKAPPLY <h,...>` | Sends the images behind the drawing. |
 | `RT_TRANSPAPPLY <h> <x_px> <y_px> <tolerance_%> ALL\|AREA [TINT]` | Makes the colour of that file pixel (`x`, `y` from the top left) transparent, on the whole image or the connected area only; `TINT` colours the rest with the layer's colour. |
 | `RT_TRANSPOFFAPPLY <h,...>` | Turns transparency off. |
 

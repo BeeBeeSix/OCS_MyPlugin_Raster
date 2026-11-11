@@ -12,6 +12,31 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.8.0] - 2026-11-11
+
+### Aggiunto
+- **Allinea 2 punti** (`RT_ALIGN`): georeferenzia un'immagine. Si clicca un punto
+  riconoscibile sull'immagine e dove deve andare, poi un secondo punto e la sua
+  destinazione: l'immagine si sposta, ruota e scala da sola. Invio dopo la prima
+  coppia = solo spostamento.
+- **Ruota** (`RT_ROTATE`): con il mouse (centro, punto di riferimento, nuova
+  direzione: allinea a una linea) oppure di un angolo esatto (Invio).
+- **Inserire un PDF** (`RT_ATTACH`): da un PDF, per esempio un estratto di mappa
+  catastale, il plugin ricava l'immagine contenuta alla sua risoluzione e la salva
+  come `<nome>_pdf.png`. Nuovo campo **Scala della mappa 1:** per il modo DPI: un
+  estratto a 300 DPI in scala 1:2000 entra nelle sue dimensioni reali in metri.
+- **Porta dietro** (`RT_BACK`): le immagini vanno dietro alle linee del disegno; le
+  immagini inserite con `RT_ATTACH` ci vanno da sole.
+- **Pulisci copie** (`RT_PURGE`): sposta in una sottocartella `_trasp-non-usate` le
+  copie trasparenti che nessuna immagine del disegno usa più.
+- **Guida** (`RT_GUIDE`): pulsante con una breve guida a tutti i comandi.
+
+### Modificato
+- Il registro diagnostico ora è **spento di serie**: `RT_DIAG ON` / `RT_DIAG OFF`.
+  *Two-point georeferencing, rotation, PDF map import with map scale, send behind,
+  clean-up of unused transparent copies, in-app guide; diagnostic log off by
+  default (`RT_DIAG ON`).*
+
 ## [0.7.0] - 2026-11-09
 
 ### Aggiunto
