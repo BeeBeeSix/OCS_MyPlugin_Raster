@@ -1,0 +1,16 @@
+[plugin]
+id = "opencad.rastertools"
+name = "Raster Tools"
+version = "0.10.1"
+description = "Raster images (GIF, JPG, PNG, BMP, TIFF, WebP): insert, clip with a rectangle, polygon or polyline, cut holes and split pieces, resize on screen or by size/DPI, change the file path and find moved files. English and Italian."
+author = "Macchecaspita"
+license = "GPL-3.0-only"
+repository = "Macchecaspita/opencad-raster-plugin"
+
+[opencad]
+# Must match API_VERSION exported by the linked ocs_plugin_api.
+# Open CAD Studio v2026.45 uses API 16.
+api_version = 16
+ribbon_order = 60
+command_prefixes = ["RT_"]
+xdata_apps = []
