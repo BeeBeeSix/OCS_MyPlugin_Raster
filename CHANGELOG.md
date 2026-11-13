@@ -12,6 +12,70 @@ del rilascio.
 
 ## [Non rilasciato]
 
+## [0.10.1] - 2026-11-14
+
+### Corretto
+- `RT_OSM`: la cache delle tessere viene decodificata dal contenuto, quindi tessere JPEG/WebP
+  (tipiche delle ortofoto) funzionano anche se salvate con estensione .png.
+- `RT_OSM`: con un URL diverso da OpenStreetMap il livello è `BASEMAP`, il file si chiama
+  `map_epsg…` e il testo di credito è "Map tiles: <host>" invece di "© OpenStreetMap contributors".
+
+## [0.10.0] - 2026-11-13
+
+### Aggiunto
+- **Mappa base** (`RT_OSM`, scheda Inserisci): si seleziona un rettangolo (polilinea chiusa),
+  si indica il codice EPSG del disegno (UTM, NZTM, ecc.) e il plugin scarica le tessere
+  OpenStreetMap, le riproietta in un raster orientato a nord nel sistema del disegno e lo
+  inserisce (PNG + file world accanto al disegno, layer `OSM`, dietro al disegno) con il
+  credito "© OpenStreetMap contributors". Dimensione pixel automatica o scelta, tetto di
+  tessere (64 di default), sorgente tessere configurabile, cache di 7 giorni.
+  Forma rapida: `RT_OSM <EPSG> [pixel] [max-tessere]`.
+
+## [0.9.4] - 2026-11-13
+
+### Aggiunto
+- **Attiva alfa** (`RT_ALPHAON`, scheda Trasparenza): attiva il flag di trasparenza sulle
+  immagini selezionate, o su tutte quelle del disegno se non c'è selezione, così il canale
+  alfa dei PNG/TIFF a 32 bit viene usato. Cambia solo il flag: nessun file viene scritto
+  o copiato. `RT_TRANSPOFF` lo disattiva.
+
+## [0.9.3] - 2026-11-13
+
+### Modificato
+- Le immagini inserite con `RT_ATTACH` e `RT_FOLDER` hanno ora la **trasparenza
+  attiva**: il canale alfa di PNG/TIFF a 32 bit viene rispettato a schermo e nelle
+  stampe/PDF (prima le aree trasparenti venivano disegnate opache, di solito nere).
+  Per le immagini già nel disegno vale `RT_TRANSP`; `RT_TRANSPOFF` la disattiva.
+
+## [0.9.2] - 2026-11-13
+
+### Aggiunto
+- **GeoTIFF**: per i file `.tif`/`.tiff` la georeferenziazione viene letta dai tag
+  nell'intestazione del file (scala pixel + punto di aggancio, oppure matrice di
+  trasformazione; TIFF classico e BigTIFF; PixelIsArea/PixelIsPoint). Vale per
+  *File world* in `RT_ATTACH`, `RT_WORLD` e `RT_FOLDER`. Il `.tfw` accanto serve solo
+  se il TIFF non ha tag geografici. Più punti di controllo (GCP) non sono supportati.
+
+## [0.9.1] - 2026-11-13
+
+### Aggiunto
+- **Inserisci cartella** (`RT_FOLDER`, scheda Inserisci): si sceglie un'immagine
+  qualsiasi della cartella e vengono inserite tutte le immagini di quella cartella,
+  ognuna dove dice il suo file world, sul layer RASTER (creato se manca), dietro al
+  disegno; poi zoom estensione. Le immagini senza file world e quelle già nel disegno
+  vengono saltate e segnalate. Un solo passo di annullamento.
+
+## [0.9.0] - 2026-11-13
+
+### Aggiunto
+- **File world** (`.pgw`, `.tfw`, `.jgw`, `.gfw`, `.bpw`, `.wld`): in **Inserisci
+  immagine** (`RT_ATTACH`) nuovo modo di dimensione *File world*: l'immagine va
+  subito dove dice il file accanto (posizione, scala ed eventuale rotazione), sul
+  layer scelto, senza clic. Il file si cerca nella stessa cartella con lo stesso
+  nome (maiuscole/minuscole ininfluenti).
+- **Da file world** (`RT_WORLD`, scheda Posizione): rimette al loro posto le immagini
+  già nel disegno (selezionate, o cliccate) leggendo il file world; i ritagli restano.
+
 ## [0.8.0] - 2026-11-11
 
 ### Aggiunto

@@ -6,6 +6,7 @@
 //! * resize: by dragging a corner, or by typed width / height / factor / DPI;
 //! * relink: change the file on disk an image points to, or find moved
 //!   files in a folder;
+//! * world files: place an image from its `.pgw`/`.tfw`/`.jgw` sidecar;
 //! * list every image with its path, pixel size and whether the file exists.
 //!
 //! The crate depends only on `ocs_plugin_api` (with the `host` feature), whose
@@ -27,7 +28,10 @@ pub mod pdf;
 pub mod imgsize;
 pub mod pixels;
 mod ribbon;
+pub mod geotiff;
+pub mod osm;
 pub mod tools;
+pub mod world;
 
 /// Reverse-DNS plugin id; also the folder name under `plugins/`.
 pub const PLUGIN_ID: &str = "opencad.rastertools";

@@ -68,12 +68,22 @@ impl CadModule for RasterModule {
             vec![
                 RibbonGroup {
                     title: tr!("Inserisci", "Insert"),
-                    tools: vec![cmd("RT_ATTACH", tr!("Inserisci immagine", "Insert image"), include_bytes!("../icons/attach.svg"))],
+                    tools: vec![
+                        cmd("RT_ATTACH", tr!("Inserisci immagine", "Insert image"), include_bytes!("../icons/attach.svg")),
+                        cmd("RT_OSM", tr!("Mappa base", "Base map"), include_bytes!("../icons/osm.svg")),
+                        file_tool(
+                            "RT_FOLDER",
+                            tr!("Inserisci cartella", "Insert folder"),
+                            include_bytes!("../icons/path.svg"),
+                            tr!("Scegli un'immagine qualsiasi nella cartella: vengono inserite tutte, ognuna col suo file world", "Choose any image in the folder: all of them are inserted, each at its world file position"),
+                        ),
+                    ],
                 },
                 RibbonGroup {
                     title: tr!("Posizione", "Position"),
                     tools: vec![
                         cmd("RT_ALIGN", tr!("Allinea 2 punti", "Align 2 points"), include_bytes!("../icons/align.svg")),
+                        cmd("RT_WORLD", tr!("Da file world", "From world file"), include_bytes!("../icons/align.svg")),
                         cmd("RT_ROTATE", tr!("Ruota", "Rotate"), include_bytes!("../icons/rotate.svg")),
                         cmd("RT_BACK", tr!("Porta dietro", "Send behind"), include_bytes!("../icons/back.svg")),
                     ],
@@ -91,6 +101,7 @@ impl CadModule for RasterModule {
                     title: tr!("Trasparenza", "Transparency"),
                     tools: vec![
                         cmd("RT_TRANSP", tr!("Colore trasparente", "Transparent colour"), include_bytes!("../icons/transp.svg")),
+                        cmd("RT_ALPHAON", tr!("Attiva alfa", "Alpha on"), include_bytes!("../icons/alphaon.svg")),
                         cmd("RT_TRANSPOFF", tr!("Togli trasparenza", "Transparency off"), include_bytes!("../icons/transpoff.svg")),
                     ],
                 },

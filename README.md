@@ -15,7 +15,8 @@ in DWG/DXF drawings:
 - **insert** an image — or the picture inside a **PDF** map extract — on a layer
   of your choice (RASTER by default), behind the drawing, sized on screen, by
   width, by DPI with **map scale** or 1 pixel = 1 unit;
-- **georeference** it with **two points** (move, turn and scale at once),
+- **place it by its world file** (`.pgw`, `.tfw`, `.jgw`… beside the image — no click),
+  or **georeference** it with **two points** (move, turn and scale at once),
   **rotate** it, send it **behind** the drawing;
 - **clip** an image (keep the inside), cut a **hole** (hide the inside) or
   **split a piece** off into a new image you can move — with a **rectangle**,

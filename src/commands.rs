@@ -377,6 +377,30 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
                 attach_apply(host, &args);
             }
         }
+        "RT_OSM" => osm_command(host, &args),
+        "RT_FOLDER" => {
+            if rest.is_empty() {
+                host.push_info(tr!(
+                    "RT_FOLDER: usa il pulsante Inserisci cartella, oppure RT_FOLDER <percorso di un file o di una cartella>.",
+                    "RT_FOLDER: use the Insert folder button, or RT_FOLDER <path of a file or folder>."
+                ));
+            } else {
+                attach_folder(host, Path::new(rest.trim_matches('"')));
+            }
+        }
+        "RT_WORLD" => {
+            let sel = selected_images(host);
+            if sel.is_empty() {
+                start_pick(host, "RT_WORLDAPPLY", tr!("georeferenziare da file world", "georeference from its world file"));
+            } else {
+                world_set(host, &sel);
+            }
+        }
+        "RT_WORLDAPPLY" => {
+            if !args.is_empty() {
+                world_set(host, &parse_handles(args[0]));
+            }
+        }
         "RT_LIST" => list(host),
         "RT_BACK" => {
             let sel = selected_images(host);
@@ -505,6 +529,15 @@ pub fn handle(host: &mut dyn HostApi, cmd: &str) -> bool {
                 transp_apply(host, &args);
             }
         }
+        "RT_ALPHAON" => {
+            // Selected images, or every image in the drawing when nothing is selected.
+            let mut targets = selected_images(host);
+            let all = targets.is_empty();
+            if all {
+                targets = all_images(host).iter().map(|i| i.common.handle).collect();
+            }
+            alpha_on(host, &targets, all);
+        }
         "RT_TRANSPOFF" => {
             let sel = selected_images(host);
             if sel.is_empty() {
@@ -597,6 +630,9 @@ fn help(host: &mut dyn HostApi) {
         "Raster Tools — immagini GIF/JPG/PNG/BMP/TIFF/WebP.\n\
          RT_GUIDE: guida rapida in una finestra.\n\
          RT_ATTACH: inserisce un'immagine o il PDF di una mappa (a schermo, per larghezza, a DPI con scala, o 1 pixel = 1 unità).\n\
+         RT_OSM: scarica una mappa base OpenStreetMap per un rettangolo (polilinea chiusa selezionata) e la inserisce nel sistema EPSG del disegno (UTM, ecc.).\n\
+         RT_FOLDER: inserisce TUTTE le immagini di una cartella, ognuna dove dice il suo file world.\n\
+         RT_WORLD: posiziona le immagini dal loro file world (.pgw/.tfw/.jgw…); anche in RT_ATTACH, modo \"File world\".\n\
          RT_ALIGN: allinea l'immagine a due punti (sposta, ruota e scala).\n\
          RT_ROTATE: ruota con il mouse (centro, riferimento, nuova direzione) o di un angolo esatto (Invio).\n\
          RT_BACK: porta le immagini dietro al disegno.\n\
@@ -607,6 +643,7 @@ fn help(host: &mut dyn HostApi) {
          RT_CLIPPL / RT_HOLEPL / RT_CUTPL: come sopra, con una polilinea chiusa, un cerchio o un'ellisse esistenti.\n\
          RT_UNCLIP: toglie il ritaglio.\n\
          RT_TRANSP: rende trasparente un colore cliccato sull'immagine (crea una copia PNG).\n\
+         RT_ALPHAON: attiva il canale alfa del file sulle immagini scelte (o su tutte) — nessuna copia del file.\n\
          RT_TRANSPOFF: toglie la trasparenza.\n\
          RT_RESIZE: ridimensiona trascinando un angolo (proporzionale).\n\
          RT_SIZE: larghezza, altezza, fattore di scala o risoluzione DPI.\n\
@@ -619,6 +656,9 @@ fn help(host: &mut dyn HostApi) {
         "Raster Tools — GIF/JPG/PNG/BMP/TIFF/WebP images.\n\
          RT_GUIDE: quick guide in a dialog.\n\
          RT_ATTACH: insert an image or a map PDF (on screen, by width, by DPI with scale, or 1 pixel = 1 unit).\n\
+         RT_OSM: download an OpenStreetMap base map for a rectangle (selected closed polyline) and insert it in the drawing's EPSG system (UTM etc.).\n\
+         RT_FOLDER: insert ALL the images of a folder, each where its world file says.\n\
+         RT_WORLD: place images from their world file (.pgw/.tfw/.jgw…); also in RT_ATTACH, \"World file\" mode.\n\
          RT_ALIGN: align the image to two points (move, turn and scale).\n\
          RT_ROTATE: rotate by mouse (centre, reference, new direction) or by an exact angle (Enter).\n\
          RT_BACK: send images behind the drawing.\n\
@@ -629,6 +669,7 @@ fn help(host: &mut dyn HostApi) {
          RT_CLIPPL / RT_HOLEPL / RT_CUTPL: as above, with an existing closed polyline, circle or ellipse.\n\
          RT_UNCLIP: remove the clip.\n\
          RT_TRANSP: make a colour clicked on the image transparent (creates a PNG copy).\n\
+         RT_ALPHAON: use the file's alpha channel on the chosen images (or all) — no file copy.\n\
          RT_TRANSPOFF: turn transparency off.\n\
          RT_RESIZE: resize by dragging a corner (proportional).\n\
          RT_SIZE: width, height, scale factor or DPI resolution.\n\
@@ -835,6 +876,10 @@ fn attach_place(host: &mut dyn HostApi, args: &[&str]) {
         }
     };
     let mode = args[0].to_ascii_uppercase();
+    if mode == "WORLD" {
+        attach_world(host, &path, w, h);
+        return;
+    }
     let width = num(args.get(1).copied());
     let dpi = num(args.get(2).copied());
     let unit = args.get(3).copied().unwrap_or("MM");
@@ -894,9 +939,19 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
             return;
         }
     };
-    let mut img = RasterImage::new(&path, Vector3::new(v[0], v[1], v[2]), w as f64, h as f64);
-    img.u_vector = Vector3::new(px, 0.0, 0.0);
-    img.v_vector = Vector3::new(0.0, px, 0.0);
+    place_image(host, &path, (w, h), [v[0], v[1], v[2]], [px, 0.0, 0.0], [0.0, px, 0.0], "");
+}
+
+/// Insert `path` (`w`×`h` px) with its bottom-left corner at `ins` and the
+/// per-pixel vectors `u` (right) and `v` (up): layer from the dialog's choice,
+/// behind the drawing, selected. One undo step.
+fn place_image(host: &mut dyn HostApi, path: &str, (w, h): (u32, u32), ins: P3, u: P3, v: P3, extra: &str) {
+    let path = path.to_string();
+    let mut img = RasterImage::new(&path, Vector3::new(ins[0], ins[1], ins[2]), w as f64, h as f64);
+    img.u_vector = Vector3::new(u[0], u[1], u[2]);
+    img.v_vector = Vector3::new(v[0], v[1], v[2]);
+    // Honour the file's alpha channel (opaque images are unaffected).
+    img.flags |= ImageDisplayFlags::TRANSPARENCY_ON;
     host.begin_undo_group("RT_ATTACH");
     let mut created = false;
     let mut assigned = false;
@@ -942,7 +997,8 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
     // a scan goes behind the lines already drawn
     let behind = send_back(host, &[handle], false);
     let _ = host.set_selection(&[handle]);
-    let (name, ww, hh) = (file_name_only(&path), fmt_len(w as f64 * px), fmt_len(h as f64 * px));
+    let (pw, ph) = ((u[0] * u[0] + u[1] * u[1]).sqrt(), (v[0] * v[0] + v[1] * v[1]).sqrt());
+    let (name, ww, hh) = (file_name_only(&path), fmt_len(w as f64 * pw), fmt_len(h as f64 * ph));
     let layer = host
         .document()
         .get_entity(handle)
@@ -951,16 +1007,421 @@ fn attach_apply(host: &mut dyn HostApi, args: &[&str]) {
         .unwrap_or_else(|| "0".into());
     host.push_info(&tr!(
         format!(
-            "RT_ATTACH: inserita {name} ({w}×{h} px, {ww} × {hh} unità) sul layer {layer}{new}{back}.",
+            "RT_ATTACH: inserita {name} ({w}×{h} px, {ww} × {hh} unità) sul layer {layer}{new}{back}.{extra}",
             new = if created { " (creato)" } else { "" },
             back = if behind { ", dietro al disegno" } else { "" }
         ),
         format!(
-            "RT_ATTACH: inserted {name} ({w}×{h} px, {ww} × {hh} units) on layer {layer}{new}{back}.",
+            "RT_ATTACH: inserted {name} ({w}×{h} px, {ww} × {hh} units) on layer {layer}{new}{back}.{extra}",
             new = if created { " (new)" } else { "" },
             back = if behind { ", behind the drawing" } else { "" }
         )
     ));
+}
+
+/// World-file mode of RT_ATTACH: place the image where its sidecar says.
+fn attach_world(host: &mut dyn HostApi, path: &str, w: u32, h: u32) {
+    let (wf, world) = match crate::world::load(Path::new(path)) {
+        Ok(x) => x,
+        Err(e) => {
+            host.push_error(&tr!(
+                format!("RT_ATTACH: file world non utilizzabile per \"{}\": {e}.", file_name_only(path)),
+                format!("RT_ATTACH: no usable world file for \"{}\": {e}.", file_name_only(path))
+            ));
+            // the dialog already stored the layer choice; do not leak it into the next insert
+            let _ = take_pending_layer();
+            return;
+        }
+    };
+    let p = world.placement(w, h);
+    let mut extra = tr!(
+        format!(" Da {}: angolo in basso a sinistra {}, {}.", file_name_only(&wf.to_string_lossy()), fmt_len(p.ins[0]), fmt_len(p.ins[1])),
+        format!(" From {}: bottom-left corner {}, {}.", file_name_only(&wf.to_string_lossy()), fmt_len(p.ins[0]), fmt_len(p.ins[1]))
+    );
+    if world.mirrored() {
+        extra.push_str(tr!(" Attenzione: il file world descrive un'immagine specchiata.", " Warning: the world file describes a mirrored image."));
+    }
+    place_image(host, path, (w, h), p.ins, p.u, p.v, &extra);
+}
+
+/// `RT_FOLDER <file or folder>` — insert EVERY raster image of that folder,
+/// each where its world file says. Images without a world file are skipped
+/// (and listed), as are files already in the drawing. One undo step.
+fn attach_folder(host: &mut dyn HostApi, picked: &Path) {
+    let root = if picked.is_dir() { picked.to_path_buf() } else { picked.parent().map(Path::to_path_buf).unwrap_or_default() };
+    let mut files: Vec<PathBuf> = match std::fs::read_dir(&root) {
+        Ok(rd) => rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file() && p.file_name().is_some_and(|n| imgsize::is_raster_name(&n.to_string_lossy())))
+            .collect(),
+        Err(e) => {
+            host.push_error(&tr!(
+                format!("RT_FOLDER: impossibile leggere la cartella \"{}\": {e}", root.display()),
+                format!("RT_FOLDER: cannot read the folder \"{}\": {e}", root.display())
+            ));
+            return;
+        }
+    };
+    files.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
+    if files.is_empty() {
+        host.push_error(&tr!(
+            format!("RT_FOLDER: nessuna immagine nella cartella \"{}\".", root.display()),
+            format!("RT_FOLDER: no images in the folder \"{}\".", root.display())
+        ));
+        return;
+    }
+    let norm = |s: &str| s.replace('\\', "/").to_lowercase();
+    let existing: HashSet<String> = all_images(host).iter().map(|i| norm(&i.file_path)).collect();
+
+    let mut imgs: Vec<RasterImage> = Vec::new();
+    let (mut dup, mut mirrored) = (0usize, 0usize);
+    let (mut no_world, mut bad): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
+    for f in &files {
+        let path = f.to_string_lossy().to_string();
+        let name = file_name_only(&path).to_string();
+        if existing.contains(&norm(&path)) {
+            dup += 1;
+            continue;
+        }
+        let (w, h) = match imgsize::read_dims(f) {
+            Ok(d) if d.0 > 0 && d.1 > 0 => d,
+            _ => {
+                bad.push(name);
+                continue;
+            }
+        };
+        let world = match crate::world::load(f) {
+            Ok((_, world)) => world,
+            Err(e) if e.starts_with("no world file") => {
+                no_world.push(name);
+                continue;
+            }
+            Err(e) => {
+                bad.push(format!("{name} ({e})"));
+                continue;
+            }
+        };
+        if world.mirrored() {
+            mirrored += 1;
+        }
+        let p = world.placement(w, h);
+        let mut img = RasterImage::new(&path, v3(p.ins), w as f64, h as f64);
+        img.u_vector = v3(p.u);
+        img.v_vector = v3(p.v);
+        img.flags |= ImageDisplayFlags::TRANSPARENCY_ON;
+        imgs.push(img);
+    }
+
+    let mut inserted = 0usize;
+    let mut layer_note = String::new();
+    if !imgs.is_empty() {
+        host.begin_undo_group("RT_FOLDER");
+        // RASTER layer, created when missing (white), like RT_ATTACH's default
+        let name = layer_names(host)
+            .into_iter()
+            .find(|n| n.eq_ignore_ascii_case(RASTER_LAYER))
+            .unwrap_or_else(|| RASTER_LAYER.to_string());
+        let exists = host.document().layers.get(&name).is_some();
+        let mut created = false;
+        if !exists {
+            let config = ocs_plugin_api::host::LayerConfig {
+                name: name.clone(),
+                color: Some(codec::types::Color::Index(7)),
+                ..Default::default()
+            };
+            created = host.add_layer(config).is_some();
+        }
+        if exists || created {
+            for img in &mut imgs {
+                img.common.layer = name.clone();
+            }
+            layer_note = format!(" {name}{}", if created { tr!(" (creato)", " (new)") } else { "" });
+        }
+        let handles: Vec<Handle> = host
+            .add_entities(imgs.into_iter().map(EntityType::RasterImage).collect())
+            .into_iter()
+            .filter(|h| !h.is_null())
+            .collect();
+        host.end_undo_group();
+        inserted = handles.len();
+        if inserted > 0 {
+            host.set_dirty();
+            send_back(host, &handles, false);
+            let _ = host.set_selection(&handles);
+            host.execute_command("ZOOM EXTENTS");
+        }
+    }
+
+    let list = |v: &[String]| {
+        let mut s: Vec<&str> = v.iter().take(8).map(|x| x.as_str()).collect();
+        if v.len() > 8 {
+            s.push("…");
+        }
+        s.join(", ")
+    };
+    host.push_info(&tr!(
+        format!("RT_FOLDER: {inserted} immagine/i inserite da \"{}\" sul layer{layer_note}.", root.display()),
+        format!("RT_FOLDER: {inserted} image(s) inserted from \"{}\" on layer{layer_note}.", root.display())
+    ));
+    if dup > 0 {
+        host.push_info(&tr!(format!("RT_FOLDER: {dup} già nel disegno, saltate."), format!("RT_FOLDER: {dup} already in the drawing, skipped.")));
+    }
+    if !no_world.is_empty() {
+        host.push_error(&tr!(
+            format!("RT_FOLDER: {} senza file world, saltate: {}.", no_world.len(), list(&no_world)),
+            format!("RT_FOLDER: {} without a world file, skipped: {}.", no_world.len(), list(&no_world))
+        ));
+    }
+    if !bad.is_empty() {
+        host.push_error(&tr!(
+            format!("RT_FOLDER: {} non utilizzabili: {}.", bad.len(), list(&bad)),
+            format!("RT_FOLDER: {} unusable: {}.", bad.len(), list(&bad))
+        ));
+    }
+    if mirrored > 0 {
+        host.push_error(&tr!(
+            format!("RT_FOLDER: {mirrored} file world descrivono un'immagine specchiata."),
+            format!("RT_FOLDER: {mirrored} world file(s) describe a mirrored image.")
+        ));
+    }
+}
+
+/// `RT_WORLD` / `RT_WORLDAPPLY <handles>` — put images already in the drawing
+/// where their world file says (position, scale, rotation; clips are kept).
+fn world_set(host: &mut dyn HostApi, handles: &[Handle]) {
+    let dir = dwg_dir(host);
+    let (mut done, mut skipped) = (0usize, 0usize);
+    let mut updates: Vec<RasterImage> = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
+    for h in handles {
+        let Some(mut img) = fetch(host, *h) else { continue };
+        let name = file_name_only(&img.file_path).to_string();
+        let Some(file) = resolve(&img.file_path, dir.as_deref()) else {
+            notes.push(tr!(format!("{name}: file immagine non trovato."), format!("{name}: image file not found.")).to_string());
+            skipped += 1;
+            continue;
+        };
+        let (px_w, px_h) = (img.size.x.round() as u32, img.size.y.round() as u32);
+        match crate::world::load(&file) {
+            Ok((_, world)) => {
+                let p = world.placement(px_w, px_h);
+                img.insertion_point = v3(p.ins);
+                img.u_vector = v3(p.u);
+                img.v_vector = v3(p.v);
+                if world.mirrored() {
+                    notes.push(tr!(format!("{name}: il file world descrive un'immagine specchiata."), format!("{name}: the world file describes a mirrored image.")).to_string());
+                }
+                updates.push(img);
+            }
+            Err(e) => {
+                notes.push(format!("{name}: {e}"));
+                skipped += 1;
+            }
+        }
+    }
+    if !updates.is_empty() {
+        host.begin_undo_group("RT_WORLD");
+        for img in updates {
+            if host.update_entity(EntityType::RasterImage(img)) {
+                done += 1;
+            } else {
+                skipped += 1;
+            }
+        }
+        host.end_undo_group();
+        host.set_dirty();
+    }
+    for n in notes.iter().take(10) {
+        host.push_error(&format!("RT_WORLD: {n}"));
+    }
+    host.push_info(&tr!(
+        format!("RT_WORLD: {done} immagine/i posizionate dal file world, {skipped} saltate."),
+        format!("RT_WORLD: {done} image(s) placed from their world file, {skipped} skipped.")
+    ));
+}
+
+// ── RT_OSM: base map from web-map tiles ─────────────────────────────────────
+
+/// What the dialog collected (and the rectangle taken before it opened: the
+/// re-dispatched command starts with an empty selection).
+#[derive(Clone)]
+pub struct OsmJob {
+    pub bbox: [f64; 4], // e0, n0, e1, n1
+    pub epsg: u16,
+    pub pixel: Option<f64>,
+    pub max_tiles: u32,
+    pub url: String,
+}
+
+static OSM_JOB: Mutex<Option<OsmJob>> = Mutex::new(None);
+/// EPSG code and tile source of the last run, offered again next time.
+static OSM_LAST: Mutex<Option<(u16, String)>> = Mutex::new(None);
+
+fn osm_defaults() -> (u16, String) {
+    OSM_LAST
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or((32610, crate::osm::OSM_URL.to_string()))
+}
+
+pub fn clear_osm_job() {
+    *OSM_JOB.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// Fill the dialog's answers into the pending job; false when there is none.
+pub fn update_osm_job(epsg: u16, pixel: Option<f64>, max_tiles: u32, url: String) -> bool {
+    let mut g = OSM_JOB.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(j) = g.as_mut() else { return false };
+    (j.epsg, j.pixel, j.max_tiles, j.url) = (epsg, pixel, max_tiles, url.clone());
+    *OSM_LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((epsg, url));
+    true
+}
+
+/// Bounding box `[min E, min N, max E, max N]` of the selected closed polylines.
+fn selected_rectangle(host: &dyn HostApi) -> Option<[f64; 4]> {
+    let doc = host.document();
+    let mut b: Option<[f64; 4]> = None;
+    for h in host.selection() {
+        let Some(EntityType::LwPolyline(p)) = doc.get_entity(h) else { continue };
+        if p.vertices.len() < 3 {
+            continue;
+        }
+        for v in &p.vertices {
+            let (x, y) = (v.location.x, v.location.y);
+            let r = b.get_or_insert([x, y, x, y]);
+            *r = [r[0].min(x), r[1].min(y), r[2].max(x), r[3].max(y)];
+        }
+    }
+    b.filter(|r| r[2] > r[0] && r[3] > r[1])
+}
+
+/// `RT_OSM` — select the rectangle (closed polyline) first, then run it.
+/// `RT_OSM <epsg> [pixel] [max-tiles]` skips the dialog; `RT_OSM @` is the
+/// dialog's own re-dispatch.
+fn osm_command(host: &mut dyn HostApi, args: &[&str]) {
+    if args.first() == Some(&"@") {
+        let job = OSM_JOB.lock().unwrap_or_else(|e| e.into_inner()).take();
+        match job {
+            Some(j) => osm_run(host, j),
+            None => host.push_error("RT_OSM: nothing to do (start it again from the Base map button)."),
+        }
+        return;
+    }
+    let Some(bbox) = selected_rectangle(host) else {
+        host.push_error(tr!(
+            "RT_OSM: seleziona prima il rettangolo (polilinea chiusa) che definisce l'area, poi lancia RT_OSM.",
+            "RT_OSM: select the rectangle (a closed polyline) that defines the area first, then run RT_OSM."
+        ));
+        return;
+    };
+    let (last_epsg, url) = osm_defaults();
+    if let Some(code) = args.first() {
+        let code = code.trim_start_matches(|c: char| c.is_ascii_alphabetic() || c == ':');
+        let Ok(epsg) = code.parse::<u16>() else {
+            host.push_error("RT_OSM: usage RT_OSM <EPSG code> [pixel size] [max tiles]");
+            return;
+        };
+        let pixel = args.get(1).and_then(|a| a.replace(',', ".").parse::<f64>().ok()).filter(|p| *p > 0.0);
+        let max_tiles = args.get(2).and_then(|a| a.parse::<u32>().ok()).unwrap_or(64).clamp(1, 400);
+        *OSM_LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((epsg, url.clone()));
+        osm_run(host, OsmJob { bbox, epsg, pixel, max_tiles, url });
+        return;
+    }
+    *OSM_JOB.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some(OsmJob { bbox, epsg: last_epsg, pixel: None, max_tiles: 64, url: url.clone() });
+    host.start_interactive(Box::new(tools::OsmDialog::new(last_epsg, url, bbox)));
+}
+
+fn osm_run(host: &mut dyn HostApi, job: OsmJob) {
+    use crate::osm;
+    let fail = |host: &mut dyn HostApi, msg: String| host.push_error(&format!("RT_OSM: {msg}"));
+    if let Err(e) = osm::check_template(&job.url) {
+        return fail(host, e);
+    }
+    let crs = match osm::Crs::new(job.epsg) {
+        Ok(c) => c,
+        Err(e) => return fail(host, e),
+    };
+    let [e0, n0, e1, n1] = job.bbox;
+    let plan = match osm::plan(&crs, &osm::Job { e0, n0, e1, n1, pixel: job.pixel, max_tiles: job.max_tiles, max_px: 8192 }) {
+        Ok(p) => p,
+        Err(e) => return fail(host, e),
+    };
+    for n in &plan.notes {
+        host.push_info(&format!("RT_OSM: {n}"));
+    }
+    host.push_output(&tr!(
+        format!("RT_OSM: scarico {} tessere (zoom {}) per {}×{} px a {} unità/px — attendere…", plan.tile_count(), plan.zoom, plan.width, plan.height, fmt_len(plan.pixel)),
+        format!("RT_OSM: downloading {} tile(s) (zoom {}) for {}×{} px at {} unit/px — please wait…", plan.tile_count(), plan.zoom, plan.width, plan.height, fmt_len(plan.pixel))
+    ));
+    let mut fetch = osm::http_fetcher(&job.url);
+    let mosaic = match osm::build_mosaic(&plan, &mut fetch) {
+        Ok(m) => m,
+        Err(e) => {
+            return fail(
+                host,
+                tr!(
+                    format!("nessuna tessera scaricata ({e}). Controlla la connessione, oppure l'URL della sorgente."),
+                    format!("no tile could be downloaded ({e}). Check the connection, or the tile source URL.")
+                )
+                .to_string(),
+            )
+        }
+    };
+    if mosaic.failed > 0 {
+        host.push_error(&tr!(
+            format!("RT_OSM: {} tessera/e su {} non scaricate: restano vuote (trasparenti).", mosaic.failed, plan.tile_count()),
+            format!("RT_OSM: {} of {} tile(s) could not be downloaded: left empty (transparent).", mosaic.failed, plan.tile_count())
+        ));
+    }
+    let rgba = osm::render(&crs, &plan, &mosaic);
+
+    // Write PNG + world file beside the drawing (temp folder when it is unsaved).
+    let saved = dwg_dir(host);
+    let dir = saved.clone().unwrap_or_else(std::env::temp_dir);
+    let stem = osm::file_stem(&job.url, job.epsg, &plan);
+    let png = dir.join(format!("{stem}.png"));
+    let opaque = rgba.chunks_exact(4).all(|p| p[3] == 255);
+    let saved_ok = if opaque {
+        let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+        image::RgbImage::from_raw(plan.width, plan.height, rgb).map(|i| i.save(&png))
+    } else {
+        image::RgbaImage::from_raw(plan.width, plan.height, rgba).map(|i| i.save(&png))
+    };
+    match saved_ok {
+        Some(Ok(())) => {}
+        Some(Err(e)) => return fail(host, format!("cannot write {}: {e}", png.display())),
+        None => return fail(host, "internal error: raster size mismatch".into()),
+    }
+    if let Err(e) = std::fs::write(png.with_extension("pgw"), osm::world_file(&plan)) {
+        return fail(host, format!("cannot write the world file: {e}"));
+    }
+
+    // Insert through the same path as every other image, on layer OSM.
+    let layer = osm::layer_name(&job.url);
+    let credit = osm::credit(&job.url);
+    let layer_missing = !layer_names(host).iter().any(|n| n.eq_ignore_ascii_case(layer));
+    set_pending_layer(layer.to_string(), layer_missing);
+    let world = crate::world::World { a: plan.pixel, d: 0.0, b: 0.0, e: -plan.pixel, c: plan.e0 + plan.pixel / 2.0, f: plan.n_top - plan.pixel / 2.0 };
+    let p = world.placement(plan.width, plan.height);
+    let extra = format!(
+        " EPSG:{}, zoom {}, {} tile(s). {}.{}",
+        job.epsg,
+        plan.zoom,
+        plan.tile_count(),
+        credit,
+        if saved.is_none() { tr!(" Disegno non salvato: immagine in ", " Drawing not saved: image in ").to_string() + &dir.display().to_string() } else { String::new() }
+    );
+    place_image(host, &png.to_string_lossy(), (plan.width, plan.height), p.ins, p.u, p.v, &extra);
+
+    // Visible credit (required by the OSM licence) in the image's lower-left corner.
+    let h = ((e1 - e0).min(n1 - n0) / 60.0).max(plan.pixel * 6.0);
+    let mut t = codec::entities::Text::with_value(&credit, Vector3::new(p.ins[0] + h * 0.4, p.ins[1] + h * 0.4, 0.0));
+    t.height = h;
+    t.common.layer = layer.to_string();
+    host.add_entity(EntityType::Text(t));
 }
 
 // ── PDF, draw order, clean-up, diagnostics ──────────────────────────────────
@@ -1427,6 +1888,51 @@ fn images_showing(host: &dyn HostApi, path: &Path) -> Vec<Handle> {
         .filter(|i| resolve(&i.file_path, dir.as_deref()).is_some_and(|p| norm(&p) == want))
         .map(|i| i.common.handle)
         .collect()
+}
+
+/// `RT_ALPHAON` — switch the image's transparency flag on so the file's own
+/// alpha channel is used (screen, PDF, SVG). Only the flag changes: no file is
+/// written or copied.
+fn alpha_on(host: &mut dyn HostApi, handles: &[Handle], whole_drawing: bool) {
+    let mut edits = Vec::new();
+    let mut already = 0usize;
+    for h in handles {
+        if let Some(mut img) = fetch(host, *h) {
+            if img.flags.contains(ImageDisplayFlags::TRANSPARENCY_ON) {
+                already += 1;
+            } else {
+                img.flags |= ImageDisplayFlags::TRANSPARENCY_ON;
+                edits.push(img);
+            }
+        }
+    }
+    if edits.is_empty() {
+        host.push_info(&if already > 0 {
+            tr!(
+                format!("RT_ALPHAON: l'alfa è già attivo su {already} immagine/i."),
+                format!("RT_ALPHAON: alpha is already on for {already} image(s).")
+            )
+        } else {
+            tr!("RT_ALPHAON: nel disegno non ci sono immagini raster.", "RT_ALPHAON: the drawing has no raster images.").to_string()
+        });
+        return;
+    }
+    host.begin_undo_group("RT_ALPHAON");
+    let mut done = 0usize;
+    for img in edits {
+        if host.update_entity(EntityType::RasterImage(img)) {
+            done += 1;
+        }
+    }
+    host.end_undo_group();
+    if done > 0 {
+        host.set_dirty();
+    }
+    let scope = if whole_drawing { tr!(" (tutte le immagini del disegno)", " (every image in the drawing)") } else { "" };
+    host.push_info(&tr!(
+        format!("RT_ALPHAON: alfa attivato su {done} immagine/i{scope}; {already} già attive."),
+        format!("RT_ALPHAON: alpha turned on for {done} image(s){scope}; {already} already on.")
+    ));
 }
 
 /// Turn transparency off (the copy keeps its colours, so the picture shows

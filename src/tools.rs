@@ -855,6 +855,108 @@ impl InteractiveCommand for SizeDialog {
     }
 }
 
+// ── RT_OSM dialog ───────────────────────────────────────────────────────────
+
+pub struct OsmDialog {
+    def: DialogDef,
+    done: bool,
+}
+
+impl OsmDialog {
+    pub fn new(epsg: u16, url: String, bbox: [f64; 4]) -> Self {
+        let (w, h) = (bbox[2] - bbox[0], bbox[3] - bbox[1]);
+        let def = DialogDef::new(tr!("Mappa base (OpenStreetMap)", "Base map (OpenStreetMap)"))
+            .with_control(info(
+                tr!(
+                    format!(
+                        "Area: {:.1} × {:.1} unità, da E {:.1} N {:.1}.\nLe tessere web-map vengono scaricate, riproiettate nel sistema del disegno \
+                         e inserite come immagine (PNG + file world accanto al disegno).",
+                        w, h, bbox[0], bbox[1]
+                    ),
+                    format!(
+                        "Area: {:.1} × {:.1} units, from E {:.1} N {:.1}.\nWeb-map tiles are downloaded, reprojected to the drawing's \
+                         coordinate system and inserted as an image (PNG + world file beside the drawing).",
+                        w, h, bbox[0], bbox[1]
+                    )
+                )
+                .into(),
+            ))
+            .with_control(DialogControl::Number {
+                id: "epsg".into(),
+                label: tr!("Codice EPSG del disegno (UTM 32610 = zona 10N WGS84)", "Drawing EPSG code (UTM 32610 = zone 10N WGS84)").into(),
+                default: f64::from(epsg),
+                min: Some(1.0),
+                max: Some(65535.0),
+                step: Some(1.0),
+            })
+            .with_control(DialogControl::Number {
+                id: "pixel".into(),
+                label: tr!("Dimensione pixel in unità (0 = automatica, la più fine possibile)", "Pixel size in units (0 = automatic, as fine as possible)").into(),
+                default: 0.0,
+                min: Some(0.0),
+                max: None,
+                step: Some(0.1),
+            })
+            .with_control(DialogControl::Number {
+                id: "tiles".into(),
+                label: tr!("Massimo numero di tessere da scaricare", "Maximum number of tiles to download").into(),
+                default: 64.0,
+                min: Some(1.0),
+                max: Some(400.0),
+                step: Some(8.0),
+            })
+            .with_control(DialogControl::Text {
+                id: "url".into(),
+                label: tr!("Sorgente tessere ({z}/{x}/{y})", "Tile source ({z}/{x}/{y})").into(),
+                default: url,
+            })
+            .with_control(info(
+                tr!(
+                    "Rispetta la politica d'uso delle tessere di OpenStreetMap (niente scaricamenti massivi); \
+                     le tessere restano in cache per 7 giorni. © OpenStreetMap contributors.",
+                    "Please respect the OpenStreetMap tile usage policy (no bulk downloads); \
+                     tiles stay cached for 7 days. © OpenStreetMap contributors."
+                )
+                .into(),
+            ))
+            .submit_label(tr!("Scarica e inserisci", "Download and insert"))
+            .cancel_label(tr!("Annulla", "Cancel"))
+            .width(600.0);
+        OsmDialog { def, done: false }
+    }
+}
+
+impl InteractiveCommand for OsmDialog {
+    fn prompt(&self) -> String {
+        tr!("RT_OSM: imposta la mappa nella finestra", "RT_OSM: set up the base map in the dialog").into()
+    }
+    fn on_point(&mut self, _pt: [f64; 3]) -> CommandStep {
+        CommandStep::Cancel
+    }
+    fn modal_dialog(&self) -> Option<DialogDef> {
+        (!self.done).then(|| self.def.clone())
+    }
+    fn on_dialog_response(&mut self, response: DialogResponse) -> CommandStep {
+        self.done = true;
+        let DialogResponse::Submitted(m) = response else {
+            commands::clear_osm_job();
+            return CommandStep::Cancel;
+        };
+        let epsg = get_num(&m, "epsg").unwrap_or(0.0).round().clamp(0.0, 65535.0) as u16;
+        let pixel = get_num(&m, "pixel").filter(|p| *p > 0.0);
+        let tiles = get_num(&m, "tiles").unwrap_or(64.0).round().clamp(1.0, 400.0) as u32;
+        let url = match m.get("url") {
+            Some(DialogValue::Text(s)) if !s.trim().is_empty() => s.trim().to_string(),
+            _ => crate::osm::OSM_URL.to_string(),
+        };
+        if commands::update_osm_job(epsg, pixel, tiles, url) {
+            CommandStep::Dispatch("RT_OSM @".to_string())
+        } else {
+            CommandStep::Cancel
+        }
+    }
+}
+
 // ── RT_PATH dialog ──────────────────────────────────────────────────────────
 
 pub struct PathDialog {
@@ -1004,6 +1106,7 @@ const ATTACH_MODES: Options = &[
     ("WIDTH", "Larghezza nel disegno", "Width in the drawing"),
     ("DPI", "Risoluzione di stampa (DPI)", "Print resolution (DPI)"),
     ("PIXEL", "1 pixel = 1 unità di disegno", "1 pixel = 1 drawing unit"),
+    ("WORLD", "File world (.pgw/.tfw/.jgw…) accanto all'immagine: posizione e scala dalle coordinate", "World file (.pgw/.tfw/.jgw…) beside the image: position and scale from its coordinates"),
 ];
 
 pub struct AttachDialog {
@@ -1082,11 +1185,13 @@ impl AttachDialog {
                      disegno, con l'angolo in basso a sinistra nel punto indicato. Il file resta \
                      collegato. Con un PDF (es. estratto di mappa) l'immagine contenuta viene \
                      salvata accanto come <nome>_pdf.png. Mappa catastale da PDF a 300 DPI, \
-                     scala 1:2000, unità metri: dimensioni reali.",
+                     scala 1:2000, unità metri: dimensioni reali. Con \"File world\" l'immagine \
+                     va subito dove dice il suo .pgw/.tfw/.jgw (nessun clic).",
                     "The image goes on the chosen layer (RASTER is created if missing) and behind \
                      the drawing, with its bottom-left corner at the given point. The file stays \
                      linked. With a PDF (e.g. a map extract) its picture is saved next to it as \
-                     <name>_pdf.png. A map PDF at 300 DPI, scale 1:2000, metres: real size."
+                     <name>_pdf.png. A map PDF at 300 DPI, scale 1:2000, metres: real size. With \"World file\" the \
+                     image goes straight where its .pgw/.tfw/.jgw says (no click)."
                 )
                 .into(),
             ))
