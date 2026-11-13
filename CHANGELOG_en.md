@@ -1,4 +1,5 @@
 # Changelog
+**English** · [Italiano](CHANGELOG.md)
 
 All notable changes to Raster Tools are recorded here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
