@@ -1,4 +1,4 @@
-# Registro delle modifiche
+# Registro delle modifiche:  **Italiano** · [English](CHANGELOG_en.md)
 
 Tutte le modifiche rilevanti di Raster Tools sono annotate qui.
 Formato: [Keep a Changelog](https://keepachangelog.com/it/1.1.0/).
